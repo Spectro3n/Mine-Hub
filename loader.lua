@@ -2,10 +2,10 @@
 -- MINE-HUB LOADER v5.0 (FIXED)
 -- ============================================================================
 -- GitHub: https://github.com/YOUR_USERNAME/Mine-Hub
--- Loadstring: loadstring(game:HttpGet("https://raw.githubusercontent.com/YOUR_USERNAME/Mine-Hub/main/loader.lua"))()
+-- Loadstring: loadstring(game:HttpGet("https://raw.githubusercontent.com/Spectro3n/Mine-Hub/refs/heads/main/loader.lua"))()
 -- ============================================================================
 
-local REPO_URL = "https://raw.githubusercontent.com/YOUR_USERNAME/Mine-Hub/main/src/"
+local REPO_URL = "https://raw.githubusercontent.com/Spectro3n/Mine-Hub/main/src/"
 
 print("🚀 [Mine-Hub] Iniciando carregamento...")
 
