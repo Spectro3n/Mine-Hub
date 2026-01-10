@@ -122,6 +122,16 @@ end), "general")
 -- INICIALIZAÇÃO
 -- ============================================================================
 
+task.spawn(function()
+    task.wait(0.5)
+    if Config.ItemESP then
+        ItemESP:Init()
+    end
+end)
+
+-- ... (resto do código)
+
+
 -- UI
 task.spawn(function()
     task.wait(0.5)
@@ -137,12 +147,6 @@ task.spawn(function()
         AdminDetection:Check()
     end)
     AdminDetection:StartWatcher()
-end)
-
--- Cleanup
-game:BindToClose(function()
-    ConnectionManager:RemoveAll()
-    ObjectPool:ClearAll()
 end)
 
 print("✅ Mine-Hub v" .. Constants.VERSION .. " carregado!")

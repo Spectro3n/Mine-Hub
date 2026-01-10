@@ -38,7 +38,7 @@ Constants.MOBS = {
 
 Constants.LIQUID_KEYWORDS = {
     "Still", "Falling", "1", "1T", "2", "2T", "3", "3T",
-    "4", "4T", "5", "5T", "6", "6T", "7", "7T", "7F",
+    "4", "4T", "5", "5T", "6", "6T","6F", "7", "7T", "7F",
     "1i", "2i", "3i", "4i", "5i", "6i", "7i",
 }
 

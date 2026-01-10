@@ -226,12 +226,14 @@ function RayfieldUI:CreateWorldTab()
     WorldTab:CreateSection("📦 Item ESP")
 
     WorldTab:CreateToggle({
-        Name = "📦 Item ESP",
+        Name = "📦 Item ESP (Itens Dropados)",
         CurrentValue = Config.ItemESP,
         Callback = function(Value)
             Config.ItemESP = Value
-            if not Value then
-                ItemESP:ClearAll()
+            if Value then
+                ItemESP:Enable()
+            else
+                ItemESP:Disable()
             end
             Notifications:Send("📦 Item ESP", Value and "✅ Ativado" or "❌ Desativado", 2)
         end,
