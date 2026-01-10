@@ -1,52 +1,25 @@
 -- ============================================================================
--- WATER WALK - Andar sobre água (FIXED)
+-- WATER WALK - Andar sobre água (CORRIGIDO - sem bug de câmera)
 -- ============================================================================
 
-local WaterWalk = {}
-
-local Config, Constants, ConnectionManager, Detection
-local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local player = Players.LocalPlayer
+local Players = game:GetService("Players")
 
-local waterWalkActive = false
-local originalSwimmingState = true
+local Config = require("Core/Config")
+local ConnectionManager = require("Engine/ConnectionManager")
+local Detection = require("Utils/Detection")
+local Notifications = require("UI/Notifications")
 
--- ============================================================================
--- DETECÇÃO DE LÍQUIDO LOCAL
--- ============================================================================
-local LIQUID_KEYWORDS = {
-    "Still", "Falling", "1", "1T", "2", "2T", "3", "3T",
-    "4", "4T", "5", "5T", "6", "6T", "7", "7T", "7F",
-    "1i", "2i", "3i", "4i", "5i", "6i", "7i",
+local WaterWalk = {
+    _active = false,
+    _originalSwimmingState = true,
 }
 
-local function isLiquidBlock(part)
-    if not part or not part:IsA("BasePart") then return false end
-    local name = part.Name
-    
-    for _, keyword in ipairs(LIQUID_KEYWORDS) do
-        if string.find(name, keyword, 1, true) then
-            return true
-        end
-    end
-    
-    if string.match(name, "^%d+[TiFtF]?$") then
-        return true
-    end
-    
-    if part.Material == Enum.Material.Water then
-        return true
-    end
-    
-    return false
-end
+local player = Players.LocalPlayer
 
--- ============================================================================
--- FUNÇÕES INTERNAS
--- ============================================================================
-local function updateWaterWalkPosition()
-    if not Config or not Config.WaterWalk then return end
+-- Função de atualização de posição
+local function updatePosition()
+    if not Config.WaterWalk then return end
     
     local char = player.Character
     if not char then return end
@@ -65,68 +38,70 @@ local function updateWaterWalkPosition()
         rayParams
     )
 
-    if result and isLiquidBlock(result.Instance) then
+    if result and Detection.IsLiquidBlock(result.Instance) then
         local targetY = result.Position.Y + 2.8
         
+        -- Cancelar velocidade vertical
         hrp.AssemblyLinearVelocity = Vector3.new(
             hrp.AssemblyLinearVelocity.X,
             0,
             hrp.AssemblyLinearVelocity.Z
         )
         
+        -- Travar Y sem colisão física
         hrp.CFrame = CFrame.new(
             hrp.Position.X,
             targetY,
             hrp.Position.Z
         ) * CFrame.Angles(0, math.rad(hrp.Orientation.Y), 0)
         
+        -- Forçar estado de corrida
         if humanoid:GetState() == Enum.HumanoidStateType.Swimming then
             humanoid:ChangeState(Enum.HumanoidStateType.Running)
         end
     end
 end
 
--- ============================================================================
--- API PÚBLICA
--- ============================================================================
 function WaterWalk:Enable()
-    Config = self._Config or Config
-    ConnectionManager = self._ConnectionManager or ConnectionManager
+    if self._active then return end
     
     local char = player.Character
     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
     
     if humanoid then
-        originalSwimmingState = humanoid:GetStateEnabled(Enum.HumanoidStateType.Swimming)
+        self._originalSwimmingState = humanoid:GetStateEnabled(Enum.HumanoidStateType.Swimming)
         humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming, false)
     end
     
-    waterWalkActive = true
+    self._active = true
     
-    ConnectionManager:Add("waterWalkUpdate", RunService.RenderStepped:Connect(updateWaterWalkPosition), "waterWalk")
+    ConnectionManager:Add("waterWalkUpdate", 
+        RunService.RenderStepped:Connect(updatePosition), 
+        "waterWalk"
+    )
     
-    print("🌊 Water Walk Ativado (sem bug de câmera!)")
+    Notifications:Send("🌊 Water Walk", "Ativado! (Sem bug de câmera)", 2)
 end
 
 function WaterWalk:Disable()
-    ConnectionManager = self._ConnectionManager or ConnectionManager
+    if not self._active then return end
     
     ConnectionManager:RemoveCategory("waterWalk")
-    waterWalkActive = false
+    self._active = false
     
     local char = player.Character
     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
     
     if humanoid then
-        humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming, originalSwimmingState)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming, self._originalSwimmingState)
     end
     
-    print("🌊 Water Walk Desativado")
+    Notifications:Send("🌊 Water Walk", "Desativado", 2)
 end
 
 function WaterWalk:Toggle(state)
-    Config = self._Config or Config
     Config.WaterWalk = state
+    
     if state then
         self:Enable()
     else
@@ -134,16 +109,21 @@ function WaterWalk:Toggle(state)
     end
 end
 
-function WaterWalk:OnCharacterAdded()
-    Config = self._Config or Config
-    
-    player.CharacterAdded:Connect(function(char)
-        if Config and Config.WaterWalk then
-            task.wait(0.5)
-            self:Disable()
-            self:Enable()
-        end
-    end)
+function WaterWalk:IsActive()
+    return self._active
 end
+
+-- Reconectar quando personagem respawna
+player.CharacterAdded:Connect(function(char)
+    if Config.WaterWalk then
+        task.wait(0.5)
+        WaterWalk:Disable()
+        WaterWalk:Enable()
+    end
+end)
+
+-- Expor globalmente
+_G.MineHub = _G.MineHub or {}
+_G.MineHub.WaterWalk = WaterWalk
 
 return WaterWalk

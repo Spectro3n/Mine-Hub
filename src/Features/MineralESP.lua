@@ -1,62 +1,25 @@
 -- ============================================================================
--- MINERAL ESP - Sistema de detecção de minerais (FIXED)
+-- MINERAL ESP - ESP principal para minérios
 -- ============================================================================
 
-local MineralESP = {}
+local Config = require("Core/Config")
+local Constants = require("Core/Constants")
+local Cache = require("Engine/Cache")
+local ConnectionManager = require("Engine/ConnectionManager")
+local ObjectPool = require("Engine/ObjectPool")
+local Helpers = require("Utils/Helpers")
+local Detection = require("Utils/Detection")
+local Notifications = require("UI/Notifications")
 
--- Dependências serão injetadas pelo loader
-local Config, Constants, Cache, ObjectPool, ConnectionManager, Helpers
+local MineralESP = {
+    _partCache = {},       -- part -> originalTransparency
+    _decalCache = {},      -- decal -> originalTransparency
+    _highlightCache = {},  -- part -> Highlight
+    _billboardCache = {},  -- part -> BillboardGui
+}
 
--- Lookup table para performance
-local MINERAL_LOOKUP = {}
-local MAX_PRIORITY = 0
-
-local function initializeLookup()
-    if not Constants then return end
-    for id, data in pairs(Constants.MINERALS) do
-        MINERAL_LOOKUP[id] = data
-        if data.priority > MAX_PRIORITY then
-            MAX_PRIORITY = data.priority
-        end
-    end
-end
-
--- ============================================================================
--- FUNÇÕES INTERNAS
--- ============================================================================
-local function getBestMineral(part)
-    if Cache.MineralResults[part] then
-        return Cache.MineralResults[part]
-    end
-    
-    local best, bestPriority = nil, -1
-    
-    for _, d in ipairs(part:GetDescendants()) do
-        if not d:IsA("Decal") then continue end
-        
-        local texture = d.Texture
-        for id, data in pairs(MINERAL_LOOKUP) do
-            if texture:find(id) then
-                if data.priority > bestPriority then
-                    best = data
-                    bestPriority = data.priority
-                    
-                    if bestPriority >= MAX_PRIORITY then
-                        Cache.MineralResults[part] = best
-                        return best
-                    end
-                end
-                break
-            end
-        end
-    end
-    
-    Cache.MineralResults[part] = best
-    return best
-end
-
-local function createHighlight(part, color)
-    if Cache.Highlights[part] then return end
+function MineralESP:CreateHighlight(part, color)
+    if self._highlightCache[part] then return end
 
     local hl = Instance.new("Highlight")
     hl.Name = "MineralHighlight"
@@ -68,11 +31,11 @@ local function createHighlight(part, color)
     hl.OutlineColor = color
     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 
-    Cache.Highlights[part] = hl
+    self._highlightCache[part] = hl
 end
 
-local function createBillboard(part, mineralData)
-    if Cache.Billboards[part] then return end
+function MineralESP:CreateBillboard(part, mineralData)
+    if self._billboardCache[part] then return end
 
     local bb = ObjectPool:Get("BillboardGui")
     bb.Name = "MineralBillboard"
@@ -119,41 +82,40 @@ local function createBillboard(part, mineralData)
     lbl.Text = "⛏️ " .. mineralData.name
     lbl.TextColor3 = mineralData.color
 
-    Cache.Billboards[part] = bb
+    self._billboardCache[part] = bb
 end
 
-local function matchDecal(decal, id)
-    return decal:IsA("Decal") and decal.Texture:find(id)
-end
+function MineralESP:ApplyInvisible(part)
+    if self._partCache[part] then return end
 
-local function applyInvisible(part)
-    if Cache.Parts[part] then return end
-
-    Cache.Parts[part] = part.LocalTransparencyModifier
+    self._partCache[part] = part.LocalTransparencyModifier
     part.LocalTransparencyModifier = 1
 
     for _, d in ipairs(part:GetDescendants()) do
-        if matchDecal(d, Constants.INVISIBLE_ID) then
-            Cache.Decals[d] = d.Transparency
+        if Helpers.MatchDecal(d, Constants.INVISIBLE_ID) then
+            self._decalCache[d] = d.Transparency
             d.Transparency = 1
         end
     end
 
-    ConnectionManager:Add("invisible_" .. tostring(part:GetDebugId()), part.ChildAdded:Connect(function(child)
+    -- Observar novos decals
+    local connId = "invisible_" .. tostring(part:GetDebugId())
+    ConnectionManager:Add(connId, part.ChildAdded:Connect(function(child)
         if not Config.Enabled then return end
         task.defer(function()
-            if matchDecal(child, Constants.INVISIBLE_ID) then
-                Cache.Decals[child] = child.Transparency
+            if Helpers.MatchDecal(child, Constants.INVISIBLE_ID) then
+                self._decalCache[child] = child.Transparency
                 child.Transparency = 1
             end
 
+            -- Verificar se é mineral
             for id, data in pairs(Constants.MINERALS) do
-                if matchDecal(child, id) then
+                if Helpers.MatchDecal(child, id) then
                     if Config.ShowHighlight then
-                        createHighlight(part, data.color)
+                        self:CreateHighlight(part, data.color)
                     end
                     if Config.ShowBillboard then
-                        createBillboard(part, data)
+                        self:CreateBillboard(part, data)
                     end
                     break
                 end
@@ -162,7 +124,7 @@ local function applyInvisible(part)
     end), "minerals")
 end
 
-local function processPart(part)
+function MineralESP:ProcessPart(part)
     if not part:IsA("BasePart") then return end
 
     local hasInvisible = false
@@ -185,105 +147,121 @@ local function processPart(part)
     end
 
     if hasInvisible and Config.MakeInvisible then
-        applyInvisible(part)
+        self:ApplyInvisible(part)
     end
 
     if mineral then
         if Config.ShowHighlight then
-            createHighlight(part, mineral.color)
+            self:CreateHighlight(part, mineral.color)
         end
         if Config.ShowBillboard then
-            createBillboard(part, mineral)
+            self:CreateBillboard(part, mineral)
         end
     end
 end
 
--- ============================================================================
--- API PÚBLICA
--- ============================================================================
+function MineralESP:RestoreAll()
+    -- Restaurar transparência das partes
+    Helpers.SafeTableClear(self._partCache, function(part, oldValue)
+        if part and part.Parent then
+            part.LocalTransparencyModifier = oldValue
+        end
+    end)
+
+    -- Restaurar transparência dos decals
+    Helpers.SafeTableClear(self._decalCache, function(decal, oldValue)
+        if decal and decal.Parent then
+            decal.Transparency = oldValue
+        end
+    end)
+
+    -- Destruir highlights
+    Helpers.SafeTableClear(self._highlightCache, function(_, hl)
+        Helpers.SafeDestroy(hl)
+    end)
+
+    -- Devolver billboards ao pool
+    Helpers.SafeTableClear(self._billboardCache, function(_, bb)
+        if bb then
+            ObjectPool:Return("BillboardGui", bb)
+        end
+    end)
+    
+    -- Limpar cache de resultados
+    Cache:ClearMineralResults()
+    
+    -- Remover conexões
+    ConnectionManager:RemoveCategory("minerals")
+end
+
 function MineralESP:Enable()
-    -- Inicializar dependências se necessário
-    Config = self._Config or Config
-    Constants = self._Constants or Constants
-    Cache = self._Cache or Cache
-    ObjectPool = self._ObjectPool or ObjectPool
-    ConnectionManager = self._ConnectionManager or ConnectionManager
-    Helpers = self._Helpers or Helpers
-    
-    initializeLookup()
-    
     for _, obj in ipairs(workspace:GetDescendants()) do
-        processPart(obj)
+        self:ProcessPart(obj)
     end
 
     ConnectionManager:Add("mineralDescendant", workspace.DescendantAdded:Connect(function(obj)
         if not Config.Enabled then return end
         task.defer(function()
-            processPart(obj)
+            self:ProcessPart(obj)
         end)
     end), "minerals")
-    
-    print("✅ Mineral ESP Ativado")
 end
 
 function MineralESP:Disable()
-    Config = self._Config or Config
-    Cache = self._Cache or Cache
-    ObjectPool = self._ObjectPool or ObjectPool
-    ConnectionManager = self._ConnectionManager or ConnectionManager
-    
-    -- Restaurar transparências
-    for part, oldValue in pairs(Cache.Parts) do
-        if part and part.Parent then
-            part.LocalTransparencyModifier = oldValue
-        end
-    end
-    Cache.Parts = {}
-
-    for decal, oldValue in pairs(Cache.Decals) do
-        if decal and decal.Parent then
-            decal.Transparency = oldValue
-        end
-    end
-    Cache.Decals = {}
-
-    for _, hl in pairs(Cache.Highlights) do
-        if hl and hl.Parent then
-            hl:Destroy()
-        end
-    end
-    Cache.Highlights = {}
-
-    for _, bb in pairs(Cache.Billboards) do
-        if bb then
-            ObjectPool:Return("BillboardGui", bb)
-        end
-    end
-    Cache.Billboards = {}
-    
-    Cache.MineralResults = setmetatable({}, {__mode = "k"})
-    ConnectionManager:RemoveCategory("minerals")
-    
-    print("❌ Mineral ESP Desativado")
+    self:RestoreAll()
 end
 
 function MineralESP:Toggle()
-    Config = self._Config or Config
-    
     if Config.SafeMode then
-        warn("🛑 Safe Mode ativo - desative primeiro!")
-        return false
+        Notifications:Send("🛑 Safe Mode", "Desative o Safe Mode primeiro!", 2)
+        return
     end
     
     Config.Enabled = not Config.Enabled
 
     if Config.Enabled then
         self:Enable()
+        print("✅ Mineral ESP ACTIVATED")
     else
         self:Disable()
+        print("❌ Mineral ESP DEACTIVATED")
+    end
+
+    Notifications:Send(
+        "⛏️ Mineral ESP",
+        Config.Enabled and "✅ Activated" or "❌ Deactivated",
+        2
+    )
+end
+
+function MineralESP:Refresh()
+    if Config.Enabled then
+        self:Disable()
+        self:Enable()
+    end
+end
+
+function MineralESP:GetStats()
+    local highlightCount = 0
+    local billboardCount = 0
+    
+    for _ in pairs(self._highlightCache) do
+        highlightCount = highlightCount + 1
     end
     
-    return Config.Enabled
+    for _ in pairs(self._billboardCache) do
+        billboardCount = billboardCount + 1
+    end
+    
+    return {
+        highlights = highlightCount,
+        billboards = billboardCount,
+        partsProcessed = highlightCount + billboardCount
+    }
 end
+
+-- Expor globalmente
+_G.MineHub = _G.MineHub or {}
+_G.MineHub.MineralESP = MineralESP
 
 return MineralESP

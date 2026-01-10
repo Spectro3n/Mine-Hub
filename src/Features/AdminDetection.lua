@@ -2,30 +2,36 @@
 -- ADMIN DETECTION - Detecção e ESP de administradores
 -- ============================================================================
 
-local AdminDetection = {}
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Config = require(script.Parent.Parent.Core.Config)
-local Constants = require(script.Parent.Parent.Core.Constants)
-local Cache = require(script.Parent.Parent.Engine.Cache)
-local ConnectionManager = require(script.Parent.Parent.Engine.ConnectionManager)
+local Config = require("Core/Config")
+local Constants = require("Core/Constants")
+local Cache = require("Engine/Cache")
+local ConnectionManager = require("Engine/ConnectionManager")
+local Helpers = require("Utils/Helpers")
+local Notifications = require("UI/Notifications")
 
-local Players = Constants.Services.Players
-local RunService = Constants.Services.RunService
-local ReplicatedStorage = Constants.Services.ReplicatedStorage
-local player = Players.LocalPlayer
+local AdminDetection = {
+    _espCache = {},      -- player -> {highlight, billboard, conn, charConn}
+    _adminsOnline = {},  -- player -> true
+    _remote = nil,
+}
 
-local AdminsRemote = ReplicatedStorage:FindFirstChild("Admins")
+local localPlayer = Players.LocalPlayer
 
--- ============================================================================
--- FUNÇÕES INTERNAS
--- ============================================================================
-local function getAdminsInServer()
-    if not AdminsRemote or not AdminsRemote:IsA("RemoteFunction") then
+function AdminDetection:Init()
+    self._remote = ReplicatedStorage:FindFirstChild("Admins")
+end
+
+function AdminDetection:GetAdminsInServer()
+    if not self._remote or not self._remote:IsA("RemoteFunction") then
         return {}
     end
 
     local ok, result = pcall(function()
-        return AdminsRemote:InvokeServer()
+        return self._remote:InvokeServer()
     end)
 
     if not ok or typeof(result) ~= "table" then
@@ -48,38 +54,36 @@ local function getAdminsInServer()
     return admins
 end
 
-local function addAdminESP(plr)
+function AdminDetection:CreateESP(player)
     if not Config.ShowAdminESP then return end
     if Config.SafeMode then return end
-    if Cache.AdminESP[plr] then return end
-    if plr == player then return end
+    if self._espCache[player] then return end
+    if player == localPlayer then return end
 
     local function apply(char)
         if not char then return end
         local hrp = char:WaitForChild("HumanoidRootPart", 5)
         if not hrp then return end
 
-        if Cache.AdminESP[plr] then
-            if Cache.AdminESP[plr].hl and Cache.AdminESP[plr].hl.Parent then 
-                Cache.AdminESP[plr].hl:Destroy() 
-            end
-            if Cache.AdminESP[plr].bb and Cache.AdminESP[plr].bb.Parent then 
-                Cache.AdminESP[plr].bb:Destroy() 
-            end
-            if Cache.AdminESP[plr].conn then 
-                Cache.AdminESP[plr].conn:Disconnect() 
+        -- Limpar ESP anterior
+        if self._espCache[player] then
+            Helpers.SafeDestroy(self._espCache[player].hl)
+            Helpers.SafeDestroy(self._espCache[player].bb)
+            if self._espCache[player].conn then
+                self._espCache[player].conn:Disconnect()
             end
         end
 
-        local hl = Instance.new("Highlight")
+        -- Highlight
+        local hl = Helpers.CreateHighlight(
+            char,
+            Constants.COLORS.ADMIN,
+            Constants.COLORS.ADMIN_OUTLINE,
+            0.25
+        )
         hl.Name = "AdminESP"
-        hl.FillColor = Color3.fromRGB(255, 60, 60)
-        hl.OutlineColor = Color3.fromRGB(255, 0, 0)
-        hl.FillTransparency = 0.25
-        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        hl.Adornee = char
-        hl.Parent = char
 
+        -- Billboard
         local bb = Instance.new("BillboardGui")
         bb.Name = "AdminBillboard"
         bb.Size = UDim2.fromOffset(180, 60)
@@ -98,112 +102,133 @@ local function addAdminESP(plr)
         lbl.Parent = bb
 
         local conn = RunService.RenderStepped:Connect(function()
-            if not plr.Parent or not plr.Character then
+            if not player.Parent or not player.Character then
                 conn:Disconnect()
                 return
             end
             local dist = Cache:GetDistanceFromCamera(hrp.Position)
-            lbl.Text = string.format("⚠️ ADMIN ⚠️\n👑 %s\n📏 %.0fm", plr.Name, dist)
+            lbl.Text = string.format("⚠️ ADMIN ⚠️\n👑 %s\n📏 %s", player.Name, Helpers.FormatDistance(dist))
         end)
 
-        Cache.AdminESP[plr] = {hl = hl, bb = bb, conn = conn}
+        self._espCache[player] = {
+            hl = hl,
+            bb = bb,
+            conn = conn
+        }
     end
 
-    Cache.AdminESP[plr] = {}
-    local charConn = plr.CharacterAdded:Connect(function(char)
+    self._espCache[player] = {}
+    
+    local charConn = player.CharacterAdded:Connect(function(char)
         task.wait(0.5)
         apply(char)
     end)
-    Cache.AdminESP[plr].charConn = charConn
+    self._espCache[player].charConn = charConn
 
-    if plr.Character then
-        apply(plr.Character)
+    if player.Character then
+        apply(player.Character)
     end
 end
 
-local function removeAdminESP(plr)
-    local data = Cache.AdminESP[plr]
+function AdminDetection:RemoveESP(player)
+    local data = self._espCache[player]
     if not data then return end
-    if data.hl and data.hl.Parent then data.hl:Destroy() end
-    if data.bb and data.bb.Parent then data.bb:Destroy() end
+    
+    Helpers.SafeDestroy(data.hl)
+    Helpers.SafeDestroy(data.bb)
+    
     if data.conn then data.conn:Disconnect() end
     if data.charConn then data.charConn:Disconnect() end
-    Cache.AdminESP[plr] = nil
+    
+    self._espCache[player] = nil
 end
 
--- ============================================================================
--- API PÚBLICA
--- ============================================================================
-function AdminDetection:Initialize()
-    print("🔍 AdminDetection inicializado")
+function AdminDetection:ClearAllESP()
+    local players = {}
+    for player in pairs(self._espCache) do
+        table.insert(players, player)
+    end
+    
+    for _, player in ipairs(players) do
+        self:RemoveESP(player)
+    end
 end
 
 function AdminDetection:Check()
     if Config.SafeMode then return end
     
-    local currentAdmins = getAdminsInServer()
+    local currentAdmins = self:GetAdminsInServer()
     local currentSet = {}
+    
     for _, admin in ipairs(currentAdmins) do
         currentSet[admin] = true
     end
     
-    -- Novos admins
+    -- Detectar novos admins
     for _, admin in ipairs(currentAdmins) do
-        if not Cache.AdminsOnline[admin] then
-            Cache.AdminsOnline[admin] = true
+        if not self._adminsOnline[admin] then
+            self._adminsOnline[admin] = true
             
-            warn("⚠️ ADMIN DETECTADO:", admin.Name)
+            Notifications:Send(
+                "⚠️ ADMIN DETECTADO!",
+                "👑 " .. admin.Name .. " entrou no servidor!",
+                5
+            )
             
             if Constants.AUTO_DISABLE_ON_ADMIN and Config.Enabled then
-                if _G.MineHub then
-                    _G.MineHub.Disable()
-                end
+                -- Desativar ESP principal
+                Config.Enabled = false
+                Notifications:Send("🛑 Auto-Disable", "ESP desativado por segurança!", 3)
             end
             
             if Config.ShowAdminESP then
-                addAdminESP(admin)
+                self:CreateESP(admin)
             end
         end
     end
     
-    -- Admins que saíram
+    -- Detectar admins que saíram
     local toRemove = {}
-    for admin in pairs(Cache.AdminsOnline) do
+    for admin in pairs(self._adminsOnline) do
         if not currentSet[admin] then
             table.insert(toRemove, admin)
         end
     end
     
     for _, admin in ipairs(toRemove) do
-        Cache.AdminsOnline[admin] = nil
-        removeAdminESP(admin)
+        self._adminsOnline[admin] = nil
+        self:RemoveESP(admin)
+        Notifications:Send("👑 Admin Saiu", admin.Name .. " saiu do servidor", 3)
     end
 end
 
-function AdminDetection:AddESP(plr)
-    addAdminESP(plr)
-end
-
-function AdminDetection:RemoveESP(plr)
-    removeAdminESP(plr)
-end
-
-function AdminDetection:ClearESP()
-    for plr, data in pairs(Cache.AdminESP) do
-        if data.hl and data.hl.Parent then data.hl:Destroy() end
-        if data.bb and data.bb.Parent then data.bb:Destroy() end
-        if data.conn then data.conn:Disconnect() end
-        if data.charConn then data.charConn:Disconnect() end
+function AdminDetection:GetOnlineAdmins()
+    local admins = {}
+    for admin in pairs(self._adminsOnline) do
+        table.insert(admins, admin)
     end
-    Cache.AdminESP = {}
+    return admins
 end
 
-function AdminDetection:RefreshAll()
-    if Config.ShowAdminESP then
-        for admin in pairs(Cache.AdminsOnline) do
-            addAdminESP(admin)
+function AdminDetection:IsAdmin(player)
+    return self._adminsOnline[player] == true
+end
+
+function AdminDetection:StartWatcher()
+    task.spawn(function()
+        while true do
+            task.wait(10)
+            if not Config.SafeMode then
+                pcall(function()
+                    self:Check()
+                end)
+            end
         end
-    end
+    end)
 end
+
+-- Expor globalmente
+_G.MineHub = _G.MineHub or {}
+_G.MineHub.AdminDetection = AdminDetection
 
 return AdminDetection

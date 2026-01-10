@@ -1,72 +1,101 @@
 -- ============================================================================
--- CACHE SYSTEM - Sistema de cache para valores computados
+-- CACHE - Sistema de cache para valores frequentemente acessados
 -- ============================================================================
 
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+
 local Cache = {
-    -- Cache de valores
+    -- Valores cacheados
     CameraPosition = Vector3.zero,
+    LocalPlayer = Players.LocalPlayer,
+    Character = nil,
+    HumanoidRootPart = nil,
+    Humanoid = nil,
+    
+    -- Controle de atualização
     LastUpdate = 0,
     UpdateInterval = 0.05,
     
-    -- Caches de objetos
-    Parts = {},
-    Decals = {},
-    Highlights = {},
-    Billboards = {},
+    -- Cache de vida real (UpdateWorld)
+    RealHealth = {},  -- [model/UUID] = {health, maxHealth, lastUpdate}
+    
+    -- Cache de minerais processados
     MineralResults = setmetatable({}, {__mode = "k"}),
-    
-    -- ESP Caches
-    AdminESP = {},
-    AdminsOnline = {},
-    PlayerMobESP = {},
-    ItemESP = {},
-    HitboxESP = {},
-    OriginalSizes = {},
-    
-    -- Health Cache (UpdateWorld)
-    RealHealth = {},  -- [model] = {health, maxHealth, lastUpdate}
 }
 
-function Cache:UpdateCameraPosition()
+function Cache:Update()
     local now = tick()
-    if now - self.LastUpdate < self.UpdateInterval then return end
+    if now - self.LastUpdate < self.UpdateInterval then 
+        return false 
+    end
+    
     self.LastUpdate = now
     
+    -- Atualizar posição da câmera
     local camera = workspace.CurrentCamera
     if camera then
         self.CameraPosition = camera.CFrame.Position
     end
+    
+    -- Atualizar referências do personagem local
+    local char = self.LocalPlayer and self.LocalPlayer.Character
+    if char then
+        self.Character = char
+        self.HumanoidRootPart = char:FindFirstChild("HumanoidRootPart")
+        self.Humanoid = char:FindFirstChildOfClass("Humanoid")
+    else
+        self.Character = nil
+        self.HumanoidRootPart = nil
+        self.Humanoid = nil
+    end
+    
+    return true
 end
 
 function Cache:GetDistanceFromCamera(position)
     return (position - self.CameraPosition).Magnitude
 end
 
-function Cache:SafeTableClear(tbl, cleanupFunc)
-    local keys = {}
-    for key in pairs(tbl) do
-        table.insert(keys, key)
-    end
-    for _, key in ipairs(keys) do
-        local value = tbl[key]
-        if cleanupFunc then
-            pcall(cleanupFunc, key, value)
-        end
-        tbl[key] = nil
+function Cache:SetRealHealth(model, health, maxHealth)
+    self.RealHealth[model] = {
+        health = health,
+        maxHealth = maxHealth or 20,
+        lastUpdate = tick()
+    }
+end
+
+function Cache:GetRealHealth(model)
+    return self.RealHealth[model]
+end
+
+function Cache:ClearRealHealth(model)
+    if model then
+        self.RealHealth[model] = nil
+    else
+        self.RealHealth = {}
     end
 end
 
-function Cache:ClearAll()
-    self:SafeTableClear(self.Parts)
-    self:SafeTableClear(self.Decals)
-    self:SafeTableClear(self.Highlights)
-    self:SafeTableClear(self.Billboards)
-    self:SafeTableClear(self.AdminESP)
-    self:SafeTableClear(self.PlayerMobESP)
-    self:SafeTableClear(self.ItemESP)
-    self:SafeTableClear(self.HitboxESP)
-    self:SafeTableClear(self.OriginalSizes)
+function Cache:SetMineralResult(part, result)
+    self.MineralResults[part] = result
+end
+
+function Cache:GetMineralResult(part)
+    return self.MineralResults[part]
+end
+
+function Cache:ClearMineralResults()
     self.MineralResults = setmetatable({}, {__mode = "k"})
 end
+
+function Cache:ClearAll()
+    self.RealHealth = {}
+    self.MineralResults = setmetatable({}, {__mode = "k"})
+end
+
+-- Expor globalmente
+_G.MineHub = _G.MineHub or {}
+_G.MineHub.Cache = Cache
 
 return Cache

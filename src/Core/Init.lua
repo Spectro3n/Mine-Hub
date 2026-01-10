@@ -1,182 +1,158 @@
 -- ============================================================================
--- INIT - Entry Point Principal do Mine-Hub
+-- INIT.lua - Entry Point Principal
 -- ============================================================================
 
-return function()
-    print("🚀 Mine-Hub v5.0 - Inicializando...")
-    
-    -- ============================================================================
-    -- CARREGAR MÓDULOS CORE
-    -- ============================================================================
-    local Constants = require(script.Parent.Constants)
-    local Config = require(script.Parent.Config)
-    
-    -- ============================================================================
-    -- CARREGAR ENGINE
-    -- ============================================================================
-    local ConnectionManager = require(script.Parent.Parent.Engine.ConnectionManager)
-    local ObjectPool = require(script.Parent.Parent.Engine.ObjectPool)
-    local Cache = require(script.Parent.Parent.Engine.Cache)
-    
-    -- ============================================================================
-    -- CARREGAR UTILS
-    -- ============================================================================
-    local Helpers = require(script.Parent.Parent.Utils.Helpers)
-    local Detection = require(script.Parent.Parent.Utils.Detection)
-    
-    -- ============================================================================
-    -- CARREGAR FEATURES
-    -- ============================================================================
-    local MineralESP = require(script.Parent.Parent.Features.MineralESP)
-    local WaterWalk = require(script.Parent.Parent.Features.WaterWalk)
-    local AlwaysDay = require(script.Parent.Parent.Features.AlwaysDay)
-    local PlayerESP = require(script.Parent.Parent.Features.PlayerESP)
-    local MobESP = require(script.Parent.Parent.Features.MobESP)
-    local ItemESP = require(script.Parent.Parent.Features.ItemESP)
-    local AdminDetection = require(script.Parent.Parent.Features.AdminDetection)
-    local Hitbox = require(script.Parent.Parent.Features.Hitbox)
-    
-    -- ============================================================================
-    -- CARREGAR UI
-    -- ============================================================================
-    local RayfieldUI = require(script.Parent.Parent.UI.RayfieldUI)
-    
-    -- ============================================================================
-    -- CRIAR SISTEMA GLOBAL
-    -- ============================================================================
-    _G.MineHub = {
-        Config = Config,
-        Constants = Constants,
-        
-        -- Engine
-        ConnectionManager = ConnectionManager,
-        ObjectPool = ObjectPool,
-        Cache = Cache,
-        
-        -- Utils
-        Helpers = Helpers,
-        Detection = Detection,
-        
-        -- Features
-        MineralESP = MineralESP,
-        WaterWalk = WaterWalk,
-        AlwaysDay = AlwaysDay,
-        PlayerESP = PlayerESP,
-        MobESP = MobESP,
-        ItemESP = ItemESP,
-        AdminDetection = AdminDetection,
-        Hitbox = Hitbox,
-        
-        -- Funções principais
-        Toggle = function()
-            return MineralESP:Toggle()
-        end,
-        
-        Enable = function()
-            if not Config.Enabled then
-                MineralESP:Toggle()
-            end
-        end,
-        
-        Disable = function()
-            if Config.Enabled then
-                MineralESP:Toggle()
-            end
-        end,
-        
-        SafeMode = function(state)
-            Config.SafeMode = state
-            if state then
-                -- Desativar tudo
-                if Config.Enabled then MineralESP:Disable() end
-                if Config.WaterWalk then WaterWalk:Disable() end
-                if Config.AlwaysDay then AlwaysDay:Disable() end
-                PlayerESP:Clear()
-                MobESP:Clear()
-                ItemESP:Clear()
-                AdminDetection:ClearESP()
-                Hitbox:RestoreAll()
-                print("🛑 SAFE MODE ATIVADO - Tudo desligado!")
-            else
-                print("✅ Safe Mode desativado")
-            end
-        end,
-    }
-    
-    -- ============================================================================
-    -- CONFIGURAR INPUT
-    -- ============================================================================
-    local UserInputService = Constants.Services.UserInputService
-    
-    ConnectionManager:Add("mainToggle", UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
-        if input.KeyCode == Constants.TOGGLE_KEY then
-            _G.MineHub.Toggle()
-        end
-    end), "general")
-    
-    -- ============================================================================
-    -- INICIAR SISTEMAS
-    -- ============================================================================
-    
-    -- Cache update loop
-    local RunService = Constants.Services.RunService
-    ConnectionManager:Add("cacheUpdate", RunService.RenderStepped:Connect(function()
-        Cache:UpdateCameraPosition()
-    end), "system")
-    
-    -- Cleanup loop
-    ConnectionManager:Add("cleanupLoop", RunService.Heartbeat:Connect(function()
-        PlayerESP:Cleanup()
-        MobESP:Cleanup()
-        ItemESP:Cleanup()
-    end), "system")
-    
-    -- Admin watcher
-    task.spawn(function()
-        task.wait(2)
-        AdminDetection:Initialize()
-        
-        while true do
-            task.wait(10)
-            if not Config.SafeMode then
-                AdminDetection:Check()
+print("🚀 Mine-Hub v5.0 - Iniciando...")
+
+-- Carregar módulos core
+local Constants = require("Core/Constants")
+local Config = require("Core/Config")
+
+-- Carregar engine
+local ConnectionManager = require("Engine/ConnectionManager")
+local ObjectPool = require("Engine/ObjectPool")
+local Cache = require("Engine/Cache")
+
+-- Carregar utils
+local Helpers = require("Utils/Helpers")
+local Detection = require("Utils/Detection")
+
+-- Carregar features
+local MineralESP = require("Features/MineralESP")
+local PlayerESP = require("Features/PlayerESP")
+local MobESP = require("Features/MobESP")
+local ItemESP = require("Features/ItemESP")
+local AdminDetection = require("Features/AdminDetection")
+local WaterWalk = require("Features/WaterWalk")
+local AlwaysDay = require("Features/AlwaysDay")
+local Hitbox = require("Features/Hitbox")
+
+-- Carregar UI
+local Notifications = require("UI/Notifications")
+local RayfieldUI = require("UI/RayfieldUI")
+
+-- Services
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+
+-- ============================================================================
+-- UPDATEWORLD INTERCEPTOR (VIDA REAL)
+-- ============================================================================
+local UpdateWorld = ReplicatedStorage:WaitForChild("UpdateWorld", 10)
+
+if UpdateWorld then
+    ConnectionManager:Add("updateWorld", UpdateWorld.OnClientEvent:Connect(function(data)
+        if not Config.ShowHealth then return end
+        if Config.SafeMode then return end
+        if typeof(data) ~= "table" then return end
+
+        -- Players
+        if data.players and Config.PlayerESP then
+            for _, info in ipairs(data.players) do
+                if info.Player and info.Health then
+                    local plr = info.Player
+                    if plr ~= player then
+                        PlayerESP:Update(plr, info.Health, info.MaxHealth or 20)
+                    end
+                end
             end
         end
-    end)
-    
-    -- WaterWalk character respawn handler
-    WaterWalk:OnCharacterAdded()
-    
-    -- ============================================================================
-    -- CARREGAR UI
-    -- ============================================================================
-    task.spawn(function()
-        local success, err = pcall(function()
-            RayfieldUI.Create()
-        end)
-        
-        if not success then
-            warn("[Mine-Hub] Erro ao carregar UI:", err)
-            warn("[Mine-Hub] Use a tecla", Constants.TOGGLE_KEY.Name, "para ativar")
+
+        -- Mobs/Entities
+        if data.chunks and Config.MobESP then
+            for _, chunk in ipairs(data.chunks) do
+                local chunkData = chunk[3]
+                if chunkData and chunkData.entitydata then
+                    for _, ent in ipairs(chunkData.entitydata) do
+                        if ent.UUID and ent.Health and ent.id then
+                            local entitiesFolder = workspace:FindFirstChild("Entities")
+                            if entitiesFolder then
+                                for _, model in ipairs(entitiesFolder:GetChildren()) do
+                                    if model:IsA("Model") and model.Name == ent.id then
+                                        if Detection.IsItem(model) then
+                                            if Config.ItemESP then
+                                                ItemESP:Create(model)
+                                            end
+                                        else
+                                            MobESP:Update(model, ent.Health, ent.MaxHealth or 20, ent.id)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
         end
-    end)
+    end), "health")
     
-    -- ============================================================================
-    -- CLEANUP ON CLOSE
-    -- ============================================================================
-    game:BindToClose(function()
-        ConnectionManager:RemoveAll()
-        ObjectPool:ClearAll()
-        Cache:ClearAll()
-    end)
-    
-    -- ============================================================================
-    -- PRONTO!
-    -- ============================================================================
-    print("✅ Mine-Hub v5.0 carregado com sucesso!")
-    print("📝 Pressione", Constants.TOGGLE_KEY.Name, "para ativar o ESP")
-    print("📝 Pressione", Constants.UI_KEY.Name, "para abrir o menu")
-    
-    return _G.MineHub
+    print("✅ UpdateWorld interceptor conectado!")
+else
+    warn("⚠️ UpdateWorld não encontrado - usando fallback de vida")
 end
+
+-- ============================================================================
+-- CLEANUP LOOP
+-- ============================================================================
+ConnectionManager:Add("cleanupLoop", RunService.Heartbeat:Connect(function()
+    -- Atualizar cache
+    Cache:Update()
+end), "system")
+
+-- ============================================================================
+-- INPUT HANDLER
+-- ============================================================================
+ConnectionManager:Add("inputBegan", UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Constants.TOGGLE_KEY then
+        MineralESP:Toggle()
+    end
+end), "general")
+
+-- ============================================================================
+-- INICIALIZAÇÃO
+-- ============================================================================
+task.spawn(function()
+    RayfieldUI:Create()
+end)
+
+-- Iniciar admin detection
+task.spawn(function()
+    AdminDetection:Init()
+    task.wait(2)
+    AdminDetection:Check()
+    AdminDetection:StartWatcher()
+end)
+
+-- Cleanup on close
+game:BindToClose(function()
+    ConnectionManager:RemoveAll()
+    ObjectPool:ClearAll()
+end)
+
+print("✅ Mine-Hub v" .. Constants.VERSION .. " carregado com sucesso!")
+print("📦 Pressione R para ativar | K para abrir menu")
+
+-- Expor API global
+_G.MineHub = _G.MineHub or {}
+_G.MineHub.Version = Constants.VERSION
+_G.MineHub.Toggle = function() MineralESP:Toggle() end
+_G.MineHub.Config = Config
+_G.MineHub.Constants = Constants
+
+return {
+    Config = Config,
+    Constants = Constants,
+    MineralESP = MineralESP,
+    PlayerESP = PlayerESP,
+    MobESP = MobESP,
+    ItemESP = ItemESP,
+    AdminDetection = AdminDetection,
+    WaterWalk = WaterWalk,
+    AlwaysDay = AlwaysDay,
+    Hitbox = Hitbox,
+}

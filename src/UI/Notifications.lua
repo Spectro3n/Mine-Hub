@@ -2,53 +2,49 @@
 -- NOTIFICATIONS - Sistema de notificações
 -- ============================================================================
 
-local Notifications = {}
+local Notifications = {
+    _rayfield = nil,
+}
+
+function Notifications:SetRayfield(rayfield)
+    self._rayfield = rayfield
+    _G.Rayfield = rayfield
+end
 
 function Notifications:Send(title, content, duration)
     duration = duration or 3
     
-    if _G.Rayfield then
-        _G.Rayfield:Notify({
-            Title = title,
-            Content = content,
-            Duration = duration,
-        })
+    if self._rayfield then
+        pcall(function()
+            self._rayfield:Notify({
+                Title = title,
+                Content = content,
+                Duration = duration,
+            })
+        end)
     else
         print(string.format("[%s] %s", title, content))
     end
 end
 
-function Notifications:Success(content, duration)
-    self:Send("✅ Sucesso", content, duration)
+function Notifications:SendWarning(content, duration)
+    self:Send("⚠️ Aviso", content, duration or 3)
 end
 
-function Notifications:Error(content, duration)
-    self:Send("❌ Erro", content, duration)
+function Notifications:SendError(content, duration)
+    self:Send("❌ Erro", content, duration or 4)
 end
 
-function Notifications:Warning(content, duration)
-    self:Send("⚠️ Aviso", content, duration)
+function Notifications:SendSuccess(content, duration)
+    self:Send("✅ Sucesso", content, duration or 2)
 end
 
-function Notifications:Info(content, duration)
-    self:Send("ℹ️ Info", content, duration)
+function Notifications:SendInfo(content, duration)
+    self:Send("ℹ️ Info", content, duration or 2)
 end
 
-function Notifications:AdminDetected(adminName)
-    self:Send("⚠️ ADMIN DETECTADO!", "👑 " .. adminName .. " entrou no servidor!", 5)
-end
-
-function Notifications:SafeMode(enabled)
-    if enabled then
-        self:Send("🛑 SAFE MODE", "TODOS os recursos foram desativados!", 3)
-    else
-        self:Send("✅ SAFE MODE", "Safe Mode desligado", 2)
-    end
-end
-
-function Notifications:FeatureToggle(featureName, enabled)
-    local status = enabled and "✅ Ativado" or "❌ Desativado"
-    self:Send(featureName, status, 2)
-end
+-- Expor globalmente
+_G.MineHub = _G.MineHub or {}
+_G.MineHub.Notifications = Notifications
 
 return Notifications

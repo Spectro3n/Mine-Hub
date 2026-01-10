@@ -1,46 +1,65 @@
 -- ============================================================================
--- ALWAYS DAY - Força o dia permanentemente
+-- ALWAYS DAY - Força o dia sempre
 -- ============================================================================
 
-local AlwaysDay = {}
+local RunService = game:GetService("RunService")
 
-local Config = require(script.Parent.Parent.Core.Config)
-local Constants = require(script.Parent.Parent.Core.Constants)
-local ConnectionManager = require(script.Parent.Parent.Engine.ConnectionManager)
+local Config = require("Core/Config")
+local ConnectionManager = require("Engine/ConnectionManager")
+local Notifications = require("UI/Notifications")
 
-local RunService = Constants.Services.RunService
+local AlwaysDay = {
+    _active = false,
+}
 
--- ============================================================================
--- API PÚBLICA
--- ============================================================================
 function AlwaysDay:Enable()
-    ConnectionManager:Add("alwaysDay", RunService.RenderStepped:Connect(function()
-        local worldInfo = workspace:FindFirstChild("WorldInfo")
-        if not worldInfo then return end
-
-        local clock = worldInfo:FindFirstChild("Clock")
-        if clock and (clock:IsA("NumberValue") or clock:IsA("IntValue")) then
-            if clock.Value ~= 1 then
-                clock.Value = 1
-            end
-        end
-    end), "world")
+    if self._active then return end
     
-    print("🌞 Always Day Ativado!")
+    self._active = true
+    
+    ConnectionManager:Add("alwaysDay", 
+        RunService.RenderStepped:Connect(function()
+            local worldInfo = workspace:FindFirstChild("WorldInfo")
+            if not worldInfo then return end
+
+            local clock = worldInfo:FindFirstChild("Clock")
+            if clock and (clock:IsA("NumberValue") or clock:IsA("IntValue")) then
+                if clock.Value ~= 1 then
+                    clock.Value = 1
+                end
+            end
+        end), 
+        "world"
+    )
+    
+    Notifications:Send("🌞 Sempre Dia", "Dia forçado ativado!", 2)
 end
 
 function AlwaysDay:Disable()
+    if not self._active then return end
+    
     ConnectionManager:Remove("alwaysDay")
-    print("🌙 Ciclo normal restaurado")
+    self._active = false
+    
+    Notifications:Send("🌞 Sempre Dia", "Ciclo normal restaurado", 2)
 end
 
 function AlwaysDay:Toggle(state)
     Config.AlwaysDay = state
+    
     if state then
         self:Enable()
     else
         self:Disable()
     end
 end
+
+function AlwaysDay:IsActive()
+    return self._active
+end
+
+-- Expor globalmente
+_G.MineHub = _G.MineHub or {}
+_G.MineHub.AlwaysDay = AlwaysDay
 
 return AlwaysDay

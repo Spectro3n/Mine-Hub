@@ -1,18 +1,18 @@
 -- ============================================================================
--- HITBOX - Visualização e expansão de hitboxes
+-- HITBOX - ESP de Hitbox e Expansão
 -- ============================================================================
 
-local Hitbox = {}
+local Config = require("Core/Config")
+local Helpers = require("Utils/Helpers")
 
-local Config = require(script.Parent.Parent.Core.Config)
-local Cache = require(script.Parent.Parent.Engine.Cache)
-local Helpers = require(script.Parent.Parent.Utils.Helpers)
+local Hitbox = {
+    _espCache = {},       -- part -> BoxHandleAdornment
+    _originalSizes = {},  -- part -> originalSize
+}
 
--- ============================================================================
--- FUNÇÕES INTERNAS
--- ============================================================================
-local function createHitboxESP(part, color)
-    if Cache.HitboxESP[part] then return end
+function Hitbox:CreateESP(part, color)
+    if not part or not part:IsA("BasePart") then return end
+    if self._espCache[part] then return end
 
     local box = Instance.new("BoxHandleAdornment")
     box.Adornee = part
@@ -20,90 +20,96 @@ local function createHitboxESP(part, color)
     box.AlwaysOnTop = true
     box.ZIndex = 5
     box.Transparency = 0.6
-    box.Color3 = color
+    box.Color3 = color or Color3.fromRGB(255, 0, 0)
     box.Parent = part
 
-    Cache.HitboxESP[part] = box
+    self._espCache[part] = box
 end
 
-local function removeHitboxESP(part)
-    if Cache.HitboxESP[part] then
-        Cache.HitboxESP[part]:Destroy()
-        Cache.HitboxESP[part] = nil
+function Hitbox:RemoveESP(part)
+    if self._espCache[part] then
+        Helpers.SafeDestroy(self._espCache[part])
+        self._espCache[part] = nil
     end
 end
 
--- ============================================================================
--- API PÚBLICA
--- ============================================================================
-function Hitbox:CreateESP(model, color)
-    if not Config.ShowHitboxESP then return end
-    
-    local root = model:FindFirstChild("HumanoidRootPart")
-    if root then
-        createHitboxESP(root, color or Color3.fromRGB(255, 0, 0))
-    end
-end
-
-function Hitbox:RemoveESP(model)
-    local root = model:FindFirstChild("HumanoidRootPart")
-    if root then
-        removeHitboxESP(root)
-    end
+function Hitbox:ClearAllESP()
+    Helpers.SafeTableClear(self._espCache, function(_, box)
+        Helpers.SafeDestroy(box)
+    end)
 end
 
 function Hitbox:Expand(part)
-    if Cache.OriginalSizes[part] then return end
-    if not part or not part.Parent then return end
-    Cache.OriginalSizes[part] = part.Size
+    if not part or not part:IsA("BasePart") then return end
+    if self._originalSizes[part] then return end
+    
+    self._originalSizes[part] = part.Size
     part.Size = Config.HitboxSize
+    
+    -- Atualizar ESP se existir
+    if self._espCache[part] then
+        self._espCache[part].Size = Config.HitboxSize
+    end
 end
 
 function Hitbox:Restore(part)
-    if Cache.OriginalSizes[part] then
+    if self._originalSizes[part] then
         if part and part.Parent then
-            part.Size = Cache.OriginalSizes[part]
+            part.Size = self._originalSizes[part]
+            
+            -- Atualizar ESP se existir
+            if self._espCache[part] then
+                self._espCache[part].Size = self._originalSizes[part]
+            end
         end
-        Cache.OriginalSizes[part] = nil
+        self._originalSizes[part] = nil
     end
 end
 
 function Hitbox:RestoreAll()
-    Helpers.SafeTableClear(Cache.OriginalSizes, function(part, size)
+    Helpers.SafeTableClear(self._originalSizes, function(part, size)
         if part and part.Parent then
             part.Size = size
+            
+            if self._espCache[part] then
+                self._espCache[part].Size = size
+            end
         end
     end)
 end
 
-function Hitbox:ClearAllESP()
-    Helpers.SafeTableClear(Cache.HitboxESP, function(_, box)
-        if box and box.Parent then
-            box:Destroy()
+function Hitbox:UpdateSize(newSize)
+    Config.HitboxSize = newSize
+    
+    -- Atualizar hitboxes já expandidas
+    for part in pairs(self._originalSizes) do
+        if part and part.Parent then
+            part.Size = newSize
+            if self._espCache[part] then
+                self._espCache[part].Size = newSize
+            end
         end
-    end)
-end
-
-function Hitbox:ExpandPlayer(player)
-    if not Config.ExpandHitbox then return end
-    
-    local char = player.Character
-    if not char then return end
-    
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if root then
-        self:Expand(root)
     end
 end
 
-function Hitbox:RestorePlayer(player)
-    local char = player.Character
-    if not char then return end
-    
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if root then
-        self:Restore(root)
+function Hitbox:GetESPCount()
+    local count = 0
+    for _ in pairs(self._espCache) do
+        count = count + 1
     end
+    return count
 end
+
+function Hitbox:GetExpandedCount()
+    local count = 0
+    for _ in pairs(self._originalSizes) do
+        count = count + 1
+    end
+    return count
+end
+
+-- Expor globalmente
+_G.MineHub = _G.MineHub or {}
+_G.MineHub.Hitbox = Hitbox
 
 return Hitbox
