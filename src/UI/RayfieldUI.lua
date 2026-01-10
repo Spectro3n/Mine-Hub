@@ -276,7 +276,7 @@ function RayfieldUI:CreateWorldTab()
 
     WorldTab:CreateSlider({
         Name = "📐 Tamanho da Hitbox",
-        Range = {3, 15},
+        Range = {3, 40},
         Increment = 0.5,
         Suffix = " studs",
         CurrentValue = 6,
