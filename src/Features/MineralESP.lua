@@ -1,24 +1,23 @@
 -- ============================================================================
--- MINERAL ESP - Sistema de detecção de minerais
+-- MINERAL ESP - Sistema de detecção de minerais (FIXED)
 -- ============================================================================
 
 local MineralESP = {}
 
-local Config = require(script.Parent.Parent.Core.Config)
-local Constants = require(script.Parent.Parent.Core.Constants)
-local Cache = require(script.Parent.Parent.Engine.Cache)
-local ObjectPool = require(script.Parent.Parent.Engine.ObjectPool)
-local ConnectionManager = require(script.Parent.Parent.Engine.ConnectionManager)
-local Helpers = require(script.Parent.Parent.Utils.Helpers)
+-- Dependências serão injetadas pelo loader
+local Config, Constants, Cache, ObjectPool, ConnectionManager, Helpers
 
 -- Lookup table para performance
 local MINERAL_LOOKUP = {}
 local MAX_PRIORITY = 0
 
-for id, data in pairs(Constants.MINERALS) do
-    MINERAL_LOOKUP[id] = data
-    if data.priority > MAX_PRIORITY then
-        MAX_PRIORITY = data.priority
+local function initializeLookup()
+    if not Constants then return end
+    for id, data in pairs(Constants.MINERALS) do
+        MINERAL_LOOKUP[id] = data
+        if data.priority > MAX_PRIORITY then
+            MAX_PRIORITY = data.priority
+        end
     end
 end
 
@@ -123,6 +122,10 @@ local function createBillboard(part, mineralData)
     Cache.Billboards[part] = bb
 end
 
+local function matchDecal(decal, id)
+    return decal:IsA("Decal") and decal.Texture:find(id)
+end
+
 local function applyInvisible(part)
     if Cache.Parts[part] then return end
 
@@ -130,7 +133,7 @@ local function applyInvisible(part)
     part.LocalTransparencyModifier = 1
 
     for _, d in ipairs(part:GetDescendants()) do
-        if Helpers.MatchDecal(d, Constants.INVISIBLE_ID) then
+        if matchDecal(d, Constants.INVISIBLE_ID) then
             Cache.Decals[d] = d.Transparency
             d.Transparency = 1
         end
@@ -139,13 +142,13 @@ local function applyInvisible(part)
     ConnectionManager:Add("invisible_" .. tostring(part:GetDebugId()), part.ChildAdded:Connect(function(child)
         if not Config.Enabled then return end
         task.defer(function()
-            if Helpers.MatchDecal(child, Constants.INVISIBLE_ID) then
+            if matchDecal(child, Constants.INVISIBLE_ID) then
                 Cache.Decals[child] = child.Transparency
                 child.Transparency = 1
             end
 
             for id, data in pairs(Constants.MINERALS) do
-                if Helpers.MatchDecal(child, id) then
+                if matchDecal(child, id) then
                     if Config.ShowHighlight then
                         createHighlight(part, data.color)
                     end
@@ -199,6 +202,16 @@ end
 -- API PÚBLICA
 -- ============================================================================
 function MineralESP:Enable()
+    -- Inicializar dependências se necessário
+    Config = self._Config or Config
+    Constants = self._Constants or Constants
+    Cache = self._Cache or Cache
+    ObjectPool = self._ObjectPool or ObjectPool
+    ConnectionManager = self._ConnectionManager or ConnectionManager
+    Helpers = self._Helpers or Helpers
+    
+    initializeLookup()
+    
     for _, obj in ipairs(workspace:GetDescendants()) do
         processPart(obj)
     end
@@ -214,30 +227,39 @@ function MineralESP:Enable()
 end
 
 function MineralESP:Disable()
+    Config = self._Config or Config
+    Cache = self._Cache or Cache
+    ObjectPool = self._ObjectPool or ObjectPool
+    ConnectionManager = self._ConnectionManager or ConnectionManager
+    
     -- Restaurar transparências
-    Cache:SafeTableClear(Cache.Parts, function(part, oldValue)
+    for part, oldValue in pairs(Cache.Parts) do
         if part and part.Parent then
             part.LocalTransparencyModifier = oldValue
         end
-    end)
+    end
+    Cache.Parts = {}
 
-    Cache:SafeTableClear(Cache.Decals, function(decal, oldValue)
+    for decal, oldValue in pairs(Cache.Decals) do
         if decal and decal.Parent then
             decal.Transparency = oldValue
         end
-    end)
+    end
+    Cache.Decals = {}
 
-    Cache:SafeTableClear(Cache.Highlights, function(_, hl)
+    for _, hl in pairs(Cache.Highlights) do
         if hl and hl.Parent then
             hl:Destroy()
         end
-    end)
+    end
+    Cache.Highlights = {}
 
-    Cache:SafeTableClear(Cache.Billboards, function(_, bb)
+    for _, bb in pairs(Cache.Billboards) do
         if bb then
             ObjectPool:Return("BillboardGui", bb)
         end
-    end)
+    end
+    Cache.Billboards = {}
     
     Cache.MineralResults = setmetatable({}, {__mode = "k"})
     ConnectionManager:RemoveCategory("minerals")
@@ -246,6 +268,8 @@ function MineralESP:Disable()
 end
 
 function MineralESP:Toggle()
+    Config = self._Config or Config
+    
     if Config.SafeMode then
         warn("🛑 Safe Mode ativo - desative primeiro!")
         return false
