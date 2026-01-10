@@ -37,17 +37,6 @@ local function LoadModule(path)
 end
 
 -- ============================================================================
--- VERIFICAÇÃO DE JOGO
--- ============================================================================
-local SUPPORTED_GAMES = {
-    [132917556483884] = true, -- Minecraft (exemplo)
-}
-
-if not SUPPORTED_GAMES[game.PlaceId] then
-    warn("[Mine-Hub] Este jogo pode não ser suportado!")
-end
-
--- ============================================================================
 -- INICIALIZAÇÃO
 -- ============================================================================
 print("🚀 [Mine-Hub] Iniciando carregamento...")
