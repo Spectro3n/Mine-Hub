@@ -1,174 +1,137 @@
 -- ============================================================================
--- MINE-HUB LOADER v1.0
--- Entry point para loadstring
+-- MINE-HUB LOADER v1.1 - CORRIGIDO
 -- ============================================================================
 
 local REPO_BASE = "https://raw.githubusercontent.com/Spectro3n/Mine-Hub/main/src/"
-local CDN_BASE = "https://cdn.jsdelivr.net/gh/Spectro3n/Mine-Hub@main/src/"
 
-local Modules = {}
-local LoadOrder = {}
+-- Armazenamento global de módulos
+_G.MineHubModules = _G.MineHubModules or {}
+_G.MineHub = _G.MineHub or {}
+
+local Modules = _G.MineHubModules
 
 local function normalizePath(path)
+    path = path:gsub("\\", "/")
     if not path:match("%.lua$") then
         path = path .. ".lua"
     end
-    path = path:gsub("%./", "")
+    path = path:gsub("^%./", "")
+    path = path:gsub("//+", "/")
     return path
 end
 
 local function fetchWithRetries(url, tries)
     tries = tries or 3
-    local lastErr
+    local lastErr = "Unknown error"
+    
     for i = 1, tries do
-        local ok, ret = pcall(function() 
-            return game:HttpGet(url) 
+        local ok, result = pcall(function()
+            return game:HttpGet(url, true)
         end)
-        if ok and type(ret) == "string" and #ret > 0 then
-            return ret
+        
+        if ok and type(result) == "string" and #result > 0 and not result:match("^404") then
+            return result, nil
         end
-        lastErr = ret
-        task.wait(0.25 * i)
+        
+        lastErr = tostring(result)
+        task.wait(0.3 * i)
     end
+    
     return nil, lastErr
 end
 
-local function LoadModule(path)
+-- Função require global
+local function MineHubRequire(path)
     path = normalizePath(path)
-
-    local mod = Modules[path]
-    if mod and not mod.__loading then
-        return mod.exports or mod
+    
+    -- Já carregado?
+    if Modules[path] and Modules[path].__loaded then
+        return Modules[path].exports
     end
-
-    if mod and mod.__loading then
-        return mod.exports
+    
+    -- Está carregando? (dependência circular)
+    if Modules[path] and Modules[path].__loading then
+        return Modules[path].exports
     end
-
-    Modules[path] = { __loading = true, exports = {} }
-    local placeholder = Modules[path]
-
+    
+    -- Criar placeholder
+    Modules[path] = {
+        __loading = true,
+        __loaded = false,
+        exports = {}
+    }
+    
     local url = REPO_BASE .. path
-    local code, fetchErr = fetchWithRetries(url, 3)
+    print("[Loader] Baixando: " .. path)
+    
+    local code, err = fetchWithRetries(url, 3)
     
     if not code then
-        local cdn = CDN_BASE .. path
-        code, fetchErr = fetchWithRetries(cdn, 2)
-    end
-
-    if not code then
         Modules[path] = nil
-        error(("[Loader] Falha ao baixar %s: %s"):format(path, tostring(fetchErr)))
+        error("[Loader] Falha ao baixar " .. path .. ": " .. tostring(err))
     end
-
-    local function customRequire(reqPath)
-        reqPath = normalizePath(reqPath)
-        if Modules[reqPath] and not Modules[reqPath].__loading then
-            return Modules[reqPath].exports or Modules[reqPath]
-        end
-        return LoadModule(reqPath)
-    end
-
-    local env = {
-        require = customRequire,
-        exports = placeholder.exports,
-        module = { exports = placeholder.exports },
-        script = { Parent = { Parent = {} } },
-        _G = _G,
-        game = game,
-        workspace = workspace,
-        task = task,
-        wait = wait,
-        spawn = spawn,
-        delay = delay,
-        tick = tick,
-        time = time,
-        typeof = typeof,
-        type = type,
-        pairs = pairs,
-        ipairs = ipairs,
-        next = next,
-        pcall = pcall,
-        xpcall = xpcall,
-        error = error,
-        warn = warn,
-        print = print,
-        tostring = tostring,
-        tonumber = tonumber,
-        string = string,
-        table = table,
-        math = math,
-        coroutine = coroutine,
-        debug = debug,
-        setmetatable = setmetatable,
-        getmetatable = getmetatable,
-        rawget = rawget,
-        rawset = rawset,
-        select = select,
-        unpack = unpack or table.unpack,
-        Instance = Instance,
-        Vector3 = Vector3,
-        Vector2 = Vector2,
-        CFrame = CFrame,
-        Color3 = Color3,
-        UDim2 = UDim2,
-        UDim = UDim,
-        Enum = Enum,
-        Ray = Ray,
-        RaycastParams = RaycastParams,
-        loadstring = loadstring,
-        getfenv = getfenv,
-        setfenv = setfenv,
-    }
-    setmetatable(env, { __index = getfenv() })
-
+    
+    -- Compilar
     local func, compileErr = loadstring(code, "@" .. path)
     if not func then
         Modules[path] = nil
-        error(("[Loader] Erro de compilação em %s: %s"):format(path, tostring(compileErr)))
+        error("[Loader] Erro de compilação em " .. path .. ": " .. tostring(compileErr))
     end
-
+    
+    -- Criar ambiente
+    local moduleExports = Modules[path].exports
+    
+    local env = setmetatable({
+        require = MineHubRequire,
+        module = { exports = moduleExports },
+        exports = moduleExports,
+        _G = _G,
+        game = game,
+        workspace = workspace,
+        script = { Parent = { Parent = {} } },
+    }, { __index = getfenv(0) })
+    
     setfenv(func, env)
-    local ok, res = pcall(func)
+    
+    -- Executar
+    local ok, result = pcall(func)
+    
     if not ok then
         Modules[path] = nil
-        error(("[Loader] Erro ao executar %s: %s\n%s"):format(path, tostring(res), debug.traceback()))
+        error("[Loader] Erro ao executar " .. path .. ": " .. tostring(result))
     end
-
-    if res ~= nil then
-        if type(res) == "table" then
-            Modules[path] = { exports = res }
-        else
-            Modules[path] = { exports = res }
-        end
-    else
-        Modules[path] = { exports = env.module.exports }
+    
+    -- Processar retorno
+    if result ~= nil then
+        Modules[path].exports = result
+    elseif env.module and env.module.exports and next(env.module.exports) then
+        Modules[path].exports = env.module.exports
     end
-
-    Modules[path].__loading = nil
-    table.insert(LoadOrder, path)
-
+    
+    Modules[path].__loading = false
+    Modules[path].__loaded = true
+    
+    print("[Loader] ✅ Carregado: " .. path)
+    
     return Modules[path].exports
 end
 
 -- Expor globalmente
-_G.MineHub = _G.MineHub or {}
-_G.MineHub.Loader = {
-    LoadModule = LoadModule,
-    Modules = Modules,
-    LoadOrder = LoadOrder,
-}
+_G.MineHubRequire = MineHubRequire
+_G.MineHub.Require = MineHubRequire
+_G.MineHub.Modules = Modules
 
--- Iniciar carregando o Init
-print("🚀 Mine-Hub Loader v1.0")
-print("📦 Carregando módulos...")
+-- Iniciar
+print("🚀 Mine-Hub Loader v1.1")
+print("📦 Iniciando carregamento...")
 
 local success, err = pcall(function()
-    LoadModule("Core/Init.lua")
+    MineHubRequire("Core/Init")
 end)
 
 if not success then
-    warn("❌ Erro ao carregar Mine-Hub: " .. tostring(err))
+    warn("❌ Erro ao carregar Mine-Hub:")
+    warn(tostring(err))
 else
     print("✅ Mine-Hub carregado com sucesso!")
 end

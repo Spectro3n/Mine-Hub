@@ -1,23 +1,32 @@
 -- ============================================================================
--- INIT.lua - Entry Point Principal
+-- INIT - Entry Point Principal (CORRIGIDO)
 -- ============================================================================
 
 print("🚀 Mine-Hub v5.0 - Iniciando...")
 
--- Carregar módulos core
+-- Serviços
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Carregar Core primeiro
 local Constants = require("Core/Constants")
 local Config = require("Core/Config")
 
--- Carregar engine
+-- Carregar Engine
 local ConnectionManager = require("Engine/ConnectionManager")
 local ObjectPool = require("Engine/ObjectPool")
 local Cache = require("Engine/Cache")
 
--- Carregar utils
+-- Carregar Utils
 local Helpers = require("Utils/Helpers")
 local Detection = require("Utils/Detection")
 
--- Carregar features
+-- Carregar UI (Notifications primeiro)
+local Notifications = require("UI/Notifications")
+
+-- Carregar Features
 local MineralESP = require("Features/MineralESP")
 local PlayerESP = require("Features/PlayerESP")
 local MobESP = require("Features/MobESP")
@@ -27,22 +36,19 @@ local WaterWalk = require("Features/WaterWalk")
 local AlwaysDay = require("Features/AlwaysDay")
 local Hitbox = require("Features/Hitbox")
 
--- Carregar UI
-local Notifications = require("UI/Notifications")
+-- Carregar UI principal
 local RayfieldUI = require("UI/RayfieldUI")
-
--- Services
-local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 
 -- ============================================================================
--- UPDATEWORLD INTERCEPTOR (VIDA REAL)
+-- UPDATEWORLD INTERCEPTOR
 -- ============================================================================
-local UpdateWorld = ReplicatedStorage:WaitForChild("UpdateWorld", 10)
+local UpdateWorld = ReplicatedStorage:FindFirstChild("UpdateWorld")
+
+if not UpdateWorld then
+    UpdateWorld = ReplicatedStorage:WaitForChild("UpdateWorld", 10)
+end
 
 if UpdateWorld then
     ConnectionManager:Add("updateWorld", UpdateWorld.OnClientEvent:Connect(function(data)
@@ -92,14 +98,13 @@ if UpdateWorld then
     
     print("✅ UpdateWorld interceptor conectado!")
 else
-    warn("⚠️ UpdateWorld não encontrado - usando fallback de vida")
+    warn("⚠️ UpdateWorld não encontrado")
 end
 
 -- ============================================================================
--- CLEANUP LOOP
+-- CACHE UPDATE LOOP
 -- ============================================================================
-ConnectionManager:Add("cleanupLoop", RunService.Heartbeat:Connect(function()
-    -- Atualizar cache
+ConnectionManager:Add("cacheUpdate", RunService.RenderStepped:Connect(function()
     Cache:Update()
 end), "system")
 
@@ -116,33 +121,37 @@ end), "general")
 -- ============================================================================
 -- INICIALIZAÇÃO
 -- ============================================================================
+
+-- UI
 task.spawn(function()
+    task.wait(0.5)
     RayfieldUI:Create()
 end)
 
--- Iniciar admin detection
+-- Admin Detection
 task.spawn(function()
+    task.wait(1)
     AdminDetection:Init()
-    task.wait(2)
-    AdminDetection:Check()
+    task.wait(1)
+    pcall(function()
+        AdminDetection:Check()
+    end)
     AdminDetection:StartWatcher()
 end)
 
--- Cleanup on close
+-- Cleanup
 game:BindToClose(function()
     ConnectionManager:RemoveAll()
     ObjectPool:ClearAll()
 end)
 
-print("✅ Mine-Hub v" .. Constants.VERSION .. " carregado com sucesso!")
-print("📦 Pressione R para ativar | K para abrir menu")
+print("✅ Mine-Hub v" .. Constants.VERSION .. " carregado!")
+print("📦 Pressione R para ativar | K para menu")
 
--- Expor API global
+-- API Global
 _G.MineHub = _G.MineHub or {}
 _G.MineHub.Version = Constants.VERSION
 _G.MineHub.Toggle = function() MineralESP:Toggle() end
-_G.MineHub.Config = Config
-_G.MineHub.Constants = Constants
 
 return {
     Config = Config,

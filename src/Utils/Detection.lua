@@ -1,20 +1,19 @@
 -- ============================================================================
--- DETECTION - Funções de detecção (mobs, itens, líquidos, etc.)
+-- DETECTION - Funções de detecção
 -- ============================================================================
 
 local Constants = require("Core/Constants")
 
 local Detection = {}
 
--- Verificar se model é um mob
 function Detection.IsMob(model)
     if not model or not model:IsA("Model") then 
         return false 
     end
-    return Constants.MOBS[model.Name:lower()] == true
+    local name = string.lower(model.Name)
+    return Constants.MOBS[name] == true
 end
 
--- Verificar se é um item (nome numérico = item dropado)
 function Detection.IsItem(model)
     if not model or not model:IsA("Model") then 
         return false 
@@ -22,7 +21,6 @@ function Detection.IsItem(model)
     return tonumber(model.Name) ~= nil
 end
 
--- Verificar se parte é líquido (água/lava)
 function Detection.IsLiquidBlock(part)
     if not part or not part:IsA("BasePart") then 
         return false 
@@ -30,19 +28,16 @@ function Detection.IsLiquidBlock(part)
     
     local name = part.Name
     
-    -- Verificar keywords
     for _, keyword in ipairs(Constants.LIQUID_KEYWORDS) do
         if string.find(name, keyword, 1, true) then
             return true
         end
     end
     
-    -- Verificar padrão numérico
     if string.match(name, "^%d+[TiFtF]?$") then
         return true
     end
     
-    -- Verificar material
     if part.Material == Enum.Material.Water then
         return true
     end
@@ -50,7 +45,6 @@ function Detection.IsLiquidBlock(part)
     return false
 end
 
--- Verificar se é player
 function Detection.IsPlayer(model)
     if not model or not model:IsA("Model") then 
         return false 
@@ -60,7 +54,6 @@ function Detection.IsPlayer(model)
     return Players:GetPlayerFromCharacter(model) ~= nil
 end
 
--- Obter player de um character
 function Detection.GetPlayerFromCharacter(model)
     if not model or not model:IsA("Model") then 
         return nil 
@@ -70,7 +63,6 @@ function Detection.GetPlayerFromCharacter(model)
     return Players:GetPlayerFromCharacter(model)
 end
 
--- Verificar se é o player local
 function Detection.IsLocalPlayer(model)
     if not model or not model:IsA("Model") then 
         return false 
@@ -81,55 +73,24 @@ function Detection.IsLocalPlayer(model)
     return localPlayer and localPlayer.Character == model
 end
 
--- Verificar se parte tem decal de minério
-function Detection.HasMineralDecal(part)
-    if not part or not part:IsA("BasePart") then 
-        return false, nil 
-    end
-    
-    for _, d in ipairs(part:GetDescendants()) do
-        if d:IsA("Decal") then
-            for id, data in pairs(Constants.MINERALS) do
-                if d.Texture:find(id) then
-                    return true, data
-                end
-            end
-        end
-    end
-    
-    return false, nil
-end
-
--- Obter melhor minério em uma parte
 function Detection.GetBestMineral(part)
     if not part or not part:IsA("BasePart") then 
         return nil 
     end
     
     local best, bestPriority = nil, -1
-    local maxPriority = 0
-    
-    -- Calcular prioridade máxima
-    for _, data in pairs(Constants.MINERALS) do
-        if data.priority > maxPriority then
-            maxPriority = data.priority
-        end
-    end
     
     for _, d in ipairs(part:GetDescendants()) do
         if not d:IsA("Decal") then continue end
         
         local texture = d.Texture
+        if not texture then continue end
+        
         for id, data in pairs(Constants.MINERALS) do
-            if texture:find(id) then
+            if string.find(texture, id, 1, true) then
                 if data.priority > bestPriority then
                     best = data
                     bestPriority = data.priority
-                    
-                    -- Se encontrou o melhor possível, retornar
-                    if bestPriority >= maxPriority then
-                        return best
-                    end
                 end
                 break
             end
@@ -139,14 +100,13 @@ function Detection.GetBestMineral(part)
     return best
 end
 
--- Verificar se parte tem decal invisível
 function Detection.HasInvisibleDecal(part)
     if not part or not part:IsA("BasePart") then 
         return false 
     end
     
     for _, d in ipairs(part:GetDescendants()) do
-        if d:IsA("Decal") and d.Texture:find(Constants.INVISIBLE_ID) then
+        if d:IsA("Decal") and d.Texture and string.find(d.Texture, Constants.INVISIBLE_ID, 1, true) then
             return true
         end
     end
@@ -154,7 +114,6 @@ function Detection.HasInvisibleDecal(part)
     return false
 end
 
--- Expor globalmente
 _G.MineHub = _G.MineHub or {}
 _G.MineHub.Detection = Detection
 

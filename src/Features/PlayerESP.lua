@@ -1,188 +1,154 @@
 -- ============================================================================
--- PLAYER ESP - ESP para jogadores com vida real
+-- PLAYER ESP
 -- ============================================================================
 
-local PlayerESP = {}
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
-local Config = require(script.Parent.Parent.Core.Config)
-local Constants = require(script.Parent.Parent.Core.Constants)
-local Cache = require(script.Parent.Parent.Engine.Cache)
-local ConnectionManager = require(script.Parent.Parent.Engine.ConnectionManager)
-local Helpers = require(script.Parent.Parent.Utils.Helpers)
+local Config = require("Core/Config")
+local Constants = require("Core/Constants")
+local Cache = require("Engine/Cache")
+local ConnectionManager = require("Engine/ConnectionManager")
+local Helpers = require("Utils/Helpers")
+local Hitbox = require("Features/Hitbox")
 
-local Players = Constants.Services.Players
-local RunService = Constants.Services.RunService
-local ReplicatedStorage = Constants.Services.ReplicatedStorage
-local player = Players.LocalPlayer
+local PlayerESP = {
+    _cache = {},
+}
 
-local UpdateWorld = ReplicatedStorage:WaitForChild("UpdateWorld", 10)
+local localPlayer = Players.LocalPlayer
 
--- ============================================================================
--- FUNÇÕES INTERNAS
--- ============================================================================
-local function createHealthESP(model, name)
-    if not model then return nil end
-    if Cache.PlayerMobESP[model] and Cache.PlayerMobESP[model].healthBB then
-        return Cache.PlayerMobESP[model]
-    end
-
-    local part = Helpers.GetPrimaryPart(model)
-    if not part then return nil end
-
-    local bb = Instance.new("BillboardGui")
-    bb.Name = "HealthESP"
-    bb.Adornee = part
-    bb.AlwaysOnTop = true
-    bb.Size = UDim2.fromOffset(160, 40)
-    bb.StudsOffset = Vector3.new(0, Helpers.GetYOffset(part), 0)
-    bb.Parent = part
-
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.fromScale(1, 1)
-    frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    frame.BackgroundTransparency = 0.2
-    frame.BorderSizePixel = 0
-    frame.Parent = bb
+function PlayerESP:Create(plr)
+    if not Config.PlayerESP then return end
+    if plr == localPlayer then return end
+    if self._cache[plr] then return end
     
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = frame
-
-    local text = Instance.new("TextLabel")
-    text.Size = UDim2.fromScale(1, 1)
-    text.BackgroundTransparency = 1
-    text.Font = Enum.Font.GothamBold
-    text.TextSize = 14
-    text.TextColor3 = Color3.new(1, 1, 1)
-    text.Text = name .. " | ??? ❤"
-    text.Parent = frame
-
-    if not Cache.PlayerMobESP[model] then
-        Cache.PlayerMobESP[model] = {}
-    end
-    Cache.PlayerMobESP[model].healthBB = bb
-    Cache.PlayerMobESP[model].healthLabel = text
-    Cache.PlayerMobESP[model].name = name
-
-    return Cache.PlayerMobESP[model]
-end
-
-local function updateHealthESP(model, health, maxHealth)
-    local esp = Cache.PlayerMobESP[model]
-    if not esp or not esp.healthLabel then return end
+    local char = plr.Character
+    if not char then return end
     
-    local name = esp.name or model.Name
-    local healthText = tostring(math.floor(health))
+    local part = Helpers.GetPrimaryPart(char)
+    if not part then return end
     
-    if maxHealth and maxHealth > 0 then
-        healthText = healthText .. "/" .. tostring(math.floor(maxHealth))
-    end
-    
-    esp.healthLabel.Text = name .. " | " .. healthText .. " ❤"
-
-    local percent = maxHealth and (health / maxHealth) or 1
-    if percent <= 0.25 then
-        esp.healthLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-    elseif percent <= 0.5 then
-        esp.healthLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
-    else
-        esp.healthLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-    end
-end
-
-local function createHighlight(model)
-    if Cache.PlayerMobESP[model] and Cache.PlayerMobESP[model].highlight then
-        return
-    end
-
-    local hl = Instance.new("Highlight")
+    local hl = Helpers.CreateHighlight(char, Constants.COLORS.PLAYER, Constants.COLORS.PLAYER_OUTLINE, 0.5)
     hl.Name = "PlayerESP"
-    hl.FillColor = Color3.fromRGB(0, 255, 255)
-    hl.OutlineColor = Color3.fromRGB(0, 200, 255)
-    hl.FillTransparency = 0.5
-    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    hl.Adornee = model
-    hl.Parent = model
     
-    if not Cache.PlayerMobESP[model] then
-        Cache.PlayerMobESP[model] = {}
-    end
-    Cache.PlayerMobESP[model].highlight = hl
-end
-
--- ============================================================================
--- API PÚBLICA
--- ============================================================================
-function PlayerESP:Initialize()
-    if not UpdateWorld then
-        warn("⚠️ UpdateWorld não encontrado - vida real desativada")
-        return
-    end
-
-    ConnectionManager:Add("updateWorldPlayers", UpdateWorld.OnClientEvent:Connect(function(data)
-        if not Config.ShowHealth or not Config.PlayerESP then return end
-        if Config.SafeMode then return end
-        if typeof(data) ~= "table" then return end
-
-        if data.players then
-            for _, info in ipairs(data.players) do
-                if info.Player and info.Health then
-                    local plr = info.Player
-                    if plr ~= player then
-                        local char = plr.Character
-                        if char then
-                            local esp = createHealthESP(char, plr.Name)
-                            if esp then
-                                updateHealthESP(char, info.Health, info.MaxHealth or 20)
-                            end
-                            
-                            createHighlight(char)
-                            
-                            Cache.RealHealth[char] = {
-                                health = info.Health,
-                                maxHealth = info.MaxHealth or 20,
-                                lastUpdate = tick()
-                            }
-                        end
-                    end
-                end
-            end
-        end
-    end), "health")
+    local bb = Helpers.CreateBillboard(part, UDim2.fromOffset(160, 40), Vector3.new(0, Helpers.GetYOffset(part), 0))
+    bb.Name = "PlayerESP"
     
-    print("✅ PlayerESP inicializado - vida real ativa!")
-end
-
-function PlayerESP:Remove(model)
-    if Cache.PlayerMobESP[model] then
-        if Cache.PlayerMobESP[model].healthBB then
-            Cache.PlayerMobESP[model].healthBB:Destroy()
+    local frame = Helpers.CreateRoundedFrame(bb, Color3.fromRGB(15, 15, 15), 0.2)
+    local label = Helpers.CreateTextLabel(frame, plr.Name .. " | ??? ❤", Color3.new(1, 1, 1))
+    
+    local updateId = "playerESP_" .. plr.UserId
+    ConnectionManager:Add(updateId, RunService.Heartbeat:Connect(function()
+        if not plr.Parent or not char or not char.Parent then
+            ConnectionManager:Remove(updateId)
+            self:Remove(plr)
+            return
         end
-        if Cache.PlayerMobESP[model].highlight then
-            Cache.PlayerMobESP[model].highlight:Destroy()
-        end
-        Cache.PlayerMobESP[model] = nil
-    end
-end
-
-function PlayerESP:Clear()
-    for model in pairs(Cache.PlayerMobESP) do
-        if not model or not model.Parent then
-            self:Remove(model)
-        elseif Players:GetPlayerFromCharacter(model) then
-            if not Config.PlayerESP then
-                self:Remove(model)
+        
+        local currentPart = Helpers.GetPrimaryPart(char)
+        if not currentPart then return end
+        
+        local dist = Cache:GetDistanceFromCamera(currentPart.Position)
+        local healthData = Cache:GetRealHealth(char)
+        
+        if healthData then
+            local healthText = Helpers.FormatHealth(healthData.health, healthData.maxHealth)
+            label.Text = string.format("%s | %s ❤ | %s", plr.Name, healthText, Helpers.FormatDistance(dist))
+            
+            local percent = healthData.maxHealth > 0 and (healthData.health / healthData.maxHealth) or 1
+            if percent <= 0.25 then
+                label.TextColor3 = Constants.COLORS.HEALTH_LOW
+            elseif percent <= 0.5 then
+                label.TextColor3 = Constants.COLORS.HEALTH_MID
+            else
+                label.TextColor3 = Constants.COLORS.HEALTH_HIGH
             end
+        else
+            label.Text = string.format("%s | %s", plr.Name, Helpers.FormatDistance(dist))
+        end
+        
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp and Config.ShowHitboxESP then
+            Hitbox:CreateESP(hrp, Constants.COLORS.PLAYER)
+        end
+        
+        if hrp and Config.ExpandHitbox then
+            Hitbox:Expand(hrp)
+        end
+    end), "playerESP")
+    
+    self._cache[plr] = {
+        billboard = bb,
+        highlight = hl,
+        healthLabel = label,
+        updateId = updateId
+    }
+end
+
+function PlayerESP:Remove(plr)
+    local data = self._cache[plr]
+    if not data then return end
+    
+    Helpers.SafeDestroy(data.billboard)
+    Helpers.SafeDestroy(data.highlight)
+    
+    if data.updateId then
+        ConnectionManager:Remove(data.updateId)
+    end
+    
+    local char = plr.Character
+    if char then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            Hitbox:RemoveESP(hrp)
+            Hitbox:Restore(hrp)
+        end
+    end
+    
+    self._cache[plr] = nil
+end
+
+function PlayerESP:Update(plr, health, maxHealth)
+    if not self._cache[plr] then
+        self:Create(plr)
+    end
+    
+    local char = plr.Character
+    if char then
+        Cache:SetRealHealth(char, health, maxHealth)
+    end
+end
+
+function PlayerESP:ClearAll()
+    local players = {}
+    for plr in pairs(self._cache) do
+        table.insert(players, plr)
+    end
+    for _, plr in ipairs(players) do
+        self:Remove(plr)
+    end
+end
+
+function PlayerESP:Refresh()
+    self:ClearAll()
+    if not Config.PlayerESP then return end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= localPlayer and plr.Character then
+            self:Create(plr)
         end
     end
 end
 
-function PlayerESP:Cleanup()
-    for model in pairs(Cache.PlayerMobESP) do
-        if not model or not model.Parent then
-            self:Remove(model)
-        end
+function PlayerESP:GetCount()
+    local count = 0
+    for _ in pairs(self._cache) do
+        count = count + 1
     end
+    return count
 end
+
+_G.MineHub = _G.MineHub or {}
+_G.MineHub.PlayerESP = PlayerESP
 
 return PlayerESP

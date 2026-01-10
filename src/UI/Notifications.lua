@@ -1,5 +1,5 @@
 -- ============================================================================
--- NOTIFICATIONS - Sistema de notificações
+-- NOTIFICATIONS
 -- ============================================================================
 
 local Notifications = {
@@ -39,11 +39,6 @@ function Notifications:SendSuccess(content, duration)
     self:Send("✅ Sucesso", content, duration or 2)
 end
 
-function Notifications:SendInfo(content, duration)
-    self:Send("ℹ️ Info", content, duration or 2)
-end
-
--- Expor globalmente
 _G.MineHub = _G.MineHub or {}
 _G.MineHub.Notifications = Notifications
 

@@ -1,25 +1,38 @@
 -- ============================================================================
--- RAYFIELD UI - Interface do usuário
+-- RAYFIELD UI
 -- ============================================================================
 
 local Config = require("Core/Config")
 local Constants = require("Core/Constants")
 local Notifications = require("UI/Notifications")
-local MineralESP = require("Features/MineralESP")
-local PlayerESP = require("Features/PlayerESP")
-local MobESP = require("Features/MobESP")
-local ItemESP = require("Features/ItemESP")
-local AdminDetection = require("Features/AdminDetection")
-local WaterWalk = require("Features/WaterWalk")
-local AlwaysDay = require("Features/AlwaysDay")
-local Hitbox = require("Features/Hitbox")
+
+-- Features serão carregadas depois para evitar dependência circular
+local MineralESP, PlayerESP, MobESP, ItemESP, AdminDetection, WaterWalk, AlwaysDay, Hitbox
 
 local RayfieldUI = {
     _window = nil,
     _rayfield = nil,
+    _loaded = false,
 }
 
+local function loadFeatures()
+    if RayfieldUI._loaded then return end
+    
+    MineralESP = require("Features/MineralESP")
+    PlayerESP = require("Features/PlayerESP")
+    MobESP = require("Features/MobESP")
+    ItemESP = require("Features/ItemESP")
+    AdminDetection = require("Features/AdminDetection")
+    WaterWalk = require("Features/WaterWalk")
+    AlwaysDay = require("Features/AlwaysDay")
+    Hitbox = require("Features/Hitbox")
+    
+    RayfieldUI._loaded = true
+end
+
 local function setSafeMode(state)
+    loadFeatures()
+    
     Config.SafeMode = state
 
     if state then
@@ -55,6 +68,8 @@ local function setSafeMode(state)
 end
 
 function RayfieldUI:Create()
+    loadFeatures()
+    
     local success, Rayfield = pcall(function()
         return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
     end)
@@ -83,7 +98,7 @@ function RayfieldUI:Create()
 
     Rayfield:Notify({
         Title = "⛏️ Mineral ESP v" .. Constants.VERSION,
-        Content = "Carregado! Pressione R para ativar\n❤️ Vida Real ativa via UpdateWorld!",
+        Content = "Carregado! Pressione R para ativar",
         Duration = 5,
     })
 
@@ -91,6 +106,8 @@ function RayfieldUI:Create()
 end
 
 function RayfieldUI:CreateMainTab()
+    loadFeatures()
+    
     local MainTab = self._window:CreateTab("🎯 Main")
 
     MainTab:CreateSection("⚡ Controles Principais")
@@ -136,6 +153,8 @@ function RayfieldUI:CreateMainTab()
 end
 
 function RayfieldUI:CreateWorldTab()
+    loadFeatures()
+    
     local WorldTab = self._window:CreateTab("🌍 World")
 
     WorldTab:CreateSection("🛡️ Segurança")
@@ -163,7 +182,7 @@ function RayfieldUI:CreateWorldTab()
     })
 
     WorldTab:CreateToggle({
-        Name = "🌊 Andar sobre a Água (FIXED)",
+        Name = "🌊 Andar sobre a Água",
         CurrentValue = Config.WaterWalk,
         Callback = function(Value)
             if not Config.SafeMode then
@@ -207,7 +226,7 @@ function RayfieldUI:CreateWorldTab()
     WorldTab:CreateSection("📦 Item ESP")
 
     WorldTab:CreateToggle({
-        Name = "📦 Item ESP (Itens no Chão)",
+        Name = "📦 Item ESP",
         CurrentValue = Config.ItemESP,
         Callback = function(Value)
             Config.ItemESP = Value
@@ -218,20 +237,15 @@ function RayfieldUI:CreateWorldTab()
         end,
     })
 
-    WorldTab:CreateSection("❤️ Informações de Vida")
+    WorldTab:CreateSection("❤️ Vida")
 
     WorldTab:CreateToggle({
-        Name = "❤️ Mostrar Vida Real (UpdateWorld)",
+        Name = "❤️ Mostrar Vida Real",
         CurrentValue = Config.ShowHealth,
         Callback = function(Value)
             Config.ShowHealth = Value
-            Notifications:Send("❤️ Vida Real", Value and "✅ Interceptando vida!" or "❌ Desativado", 2)
+            Notifications:Send("❤️ Vida Real", Value and "✅ Ativado" or "❌ Desativado", 2)
         end,
-    })
-
-    WorldTab:CreateParagraph({
-        Title = "💡 Sobre a Vida Real",
-        Content = "O sistema intercepta o RemoteEvent\n'UpdateWorld' do servidor para mostrar\na vida REAL de todos os mobs e players."
     })
 
     WorldTab:CreateSection("📦 Hitbox")
@@ -248,7 +262,7 @@ function RayfieldUI:CreateWorldTab()
     })
 
     WorldTab:CreateToggle({
-        Name = "📈 Expandir Hitbox (Client)",
+        Name = "📈 Expandir Hitbox",
         CurrentValue = Config.ExpandHitbox,
         Callback = function(Value)
             Config.ExpandHitbox = Value
@@ -296,12 +310,14 @@ function RayfieldUI:CreateWorldTab()
             ItemESP:ClearAll()
             AdminDetection:ClearAllESP()
             Hitbox:ClearAllESP()
-            Notifications:Send("🧹 Limpeza", "Todos os ESPs foram removidos!", 2)
+            Notifications:Send("🧹 Limpeza", "Todos os ESPs removidos!", 2)
         end,
     })
 end
 
 function RayfieldUI:CreateMineralsTab()
+    loadFeatures()
+    
     local MineralsTab = self._window:CreateTab("⛏️ Minerals")
 
     MineralsTab:CreateSection("🎨 Cores dos Minerais")
@@ -319,6 +335,8 @@ function RayfieldUI:CreateMineralsTab()
 end
 
 function RayfieldUI:CreateInfoTab()
+    loadFeatures()
+    
     local InfoTab = self._window:CreateTab("ℹ️ Info")
 
     InfoTab:CreateSection("📖 Como Usar")
@@ -330,7 +348,7 @@ function RayfieldUI:CreateInfoTab()
 
     InfoTab:CreateParagraph({
         Title = "🆕 Novidades v" .. Constants.VERSION,
-        Content = "• ❤️ VIDA REAL via UpdateWorld!\n• 📦 ITEM ESP (itens no chão)\n• 🌊 Water Walk CORRIGIDO\n• 🧑 Player/Mob ESP separados\n• ⚡ Sistema modular"
+        Content = "• Sistema modular\n• Vida real via UpdateWorld\n• Item ESP\n• Water Walk corrigido"
     })
 
     InfoTab:CreateButton({
@@ -350,7 +368,6 @@ function RayfieldUI:GetRayfield()
     return self._rayfield
 end
 
--- Expor globalmente
 _G.MineHub = _G.MineHub or {}
 _G.MineHub.RayfieldUI = RayfieldUI
 

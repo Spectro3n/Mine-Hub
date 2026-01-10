@@ -1,26 +1,18 @@
 -- ============================================================================
--- CACHE - Sistema de cache para valores frequentemente acessados
+-- CACHE
 -- ============================================================================
 
-local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 
 local Cache = {
-    -- Valores cacheados
     CameraPosition = Vector3.zero,
     LocalPlayer = Players.LocalPlayer,
     Character = nil,
     HumanoidRootPart = nil,
     Humanoid = nil,
-    
-    -- Controle de atualização
     LastUpdate = 0,
     UpdateInterval = 0.05,
-    
-    -- Cache de vida real (UpdateWorld)
-    RealHealth = {},  -- [model/UUID] = {health, maxHealth, lastUpdate}
-    
-    -- Cache de minerais processados
+    RealHealth = {},
     MineralResults = setmetatable({}, {__mode = "k"}),
 }
 
@@ -32,13 +24,11 @@ function Cache:Update()
     
     self.LastUpdate = now
     
-    -- Atualizar posição da câmera
     local camera = workspace.CurrentCamera
     if camera then
         self.CameraPosition = camera.CFrame.Position
     end
     
-    -- Atualizar referências do personagem local
     local char = self.LocalPlayer and self.LocalPlayer.Character
     if char then
         self.Character = char
@@ -77,14 +67,6 @@ function Cache:ClearRealHealth(model)
     end
 end
 
-function Cache:SetMineralResult(part, result)
-    self.MineralResults[part] = result
-end
-
-function Cache:GetMineralResult(part)
-    return self.MineralResults[part]
-end
-
 function Cache:ClearMineralResults()
     self.MineralResults = setmetatable({}, {__mode = "k"})
 end
@@ -94,7 +76,6 @@ function Cache:ClearAll()
     self.MineralResults = setmetatable({}, {__mode = "k"})
 end
 
--- Expor globalmente
 _G.MineHub = _G.MineHub or {}
 _G.MineHub.Cache = Cache
 

@@ -1,13 +1,13 @@
 -- ============================================================================
--- HITBOX - ESP de Hitbox e Expansão
+-- HITBOX
 -- ============================================================================
 
 local Config = require("Core/Config")
 local Helpers = require("Utils/Helpers")
 
 local Hitbox = {
-    _espCache = {},       -- part -> BoxHandleAdornment
-    _originalSizes = {},  -- part -> originalSize
+    _espCache = {},
+    _originalSizes = {},
 }
 
 function Hitbox:CreateESP(part, color)
@@ -46,7 +46,6 @@ function Hitbox:Expand(part)
     self._originalSizes[part] = part.Size
     part.Size = Config.HitboxSize
     
-    -- Atualizar ESP se existir
     if self._espCache[part] then
         self._espCache[part].Size = Config.HitboxSize
     end
@@ -56,8 +55,6 @@ function Hitbox:Restore(part)
     if self._originalSizes[part] then
         if part and part.Parent then
             part.Size = self._originalSizes[part]
-            
-            -- Atualizar ESP se existir
             if self._espCache[part] then
                 self._espCache[part].Size = self._originalSizes[part]
             end
@@ -70,7 +67,6 @@ function Hitbox:RestoreAll()
     Helpers.SafeTableClear(self._originalSizes, function(part, size)
         if part and part.Parent then
             part.Size = size
-            
             if self._espCache[part] then
                 self._espCache[part].Size = size
             end
@@ -80,8 +76,6 @@ end
 
 function Hitbox:UpdateSize(newSize)
     Config.HitboxSize = newSize
-    
-    -- Atualizar hitboxes já expandidas
     for part in pairs(self._originalSizes) do
         if part and part.Parent then
             part.Size = newSize
@@ -92,23 +86,6 @@ function Hitbox:UpdateSize(newSize)
     end
 end
 
-function Hitbox:GetESPCount()
-    local count = 0
-    for _ in pairs(self._espCache) do
-        count = count + 1
-    end
-    return count
-end
-
-function Hitbox:GetExpandedCount()
-    local count = 0
-    for _ in pairs(self._originalSizes) do
-        count = count + 1
-    end
-    return count
-end
-
--- Expor globalmente
 _G.MineHub = _G.MineHub or {}
 _G.MineHub.Hitbox = Hitbox
 

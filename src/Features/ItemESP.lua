@@ -1,5 +1,5 @@
 -- ============================================================================
--- ITEM ESP - ESP para itens no chão
+-- ITEM ESP
 -- ============================================================================
 
 local RunService = game:GetService("RunService")
@@ -12,7 +12,7 @@ local Helpers = require("Utils/Helpers")
 local Detection = require("Utils/Detection")
 
 local ItemESP = {
-    _cache = {},  -- model -> {billboard, highlight, updateId}
+    _cache = {},
 }
 
 function ItemESP:Create(model)
@@ -23,21 +23,10 @@ function ItemESP:Create(model)
     local part = Helpers.GetPrimaryPart(model)
     if not part then return end
     
-    -- Highlight
-    local hl = Helpers.CreateHighlight(
-        model,
-        Constants.COLORS.ITEM,
-        Constants.COLORS.ITEM_OUTLINE,
-        0.6
-    )
+    local hl = Helpers.CreateHighlight(model, Constants.COLORS.ITEM, Constants.COLORS.ITEM_OUTLINE, 0.6)
     hl.Name = "ItemESP"
     
-    -- Billboard
-    local bb = Helpers.CreateBillboard(
-        part,
-        UDim2.fromOffset(100, 30),
-        Vector3.new(0, 2, 0)
-    )
+    local bb = Helpers.CreateBillboard(part, UDim2.fromOffset(100, 30), Vector3.new(0, 2, 0))
     bb.Name = "ItemBillboard"
     
     local frame = Helpers.CreateRoundedFrame(bb, Color3.fromRGB(40, 40, 0), 0.3)
@@ -49,7 +38,6 @@ function ItemESP:Create(model)
     
     local label = Helpers.CreateTextLabel(frame, "📦 Item", Constants.COLORS.ITEM)
     
-    -- Connection para atualização
     local updateId = "itemESP_" .. tostring(model:GetDebugId())
     ConnectionManager:Add(updateId, RunService.Heartbeat:Connect(function()
         if not model or not model.Parent then
@@ -64,7 +52,7 @@ function ItemESP:Create(model)
         local dist = Cache:GetDistanceFromCamera(currentPart.Position)
         label.Text = string.format("📦 Item (%s)", Helpers.FormatDistance(dist))
     end), "itemESP")
-    
+
     self._cache[model] = {
         billboard = bb,
         highlight = hl,
@@ -91,7 +79,6 @@ function ItemESP:ClearAll()
     for model in pairs(self._cache) do
         table.insert(models, model)
     end
-    
     for _, model in ipairs(models) do
         self:Remove(model)
     end
@@ -105,7 +92,6 @@ function ItemESP:GetCount()
     return count
 end
 
--- Expor globalmente
 _G.MineHub = _G.MineHub or {}
 _G.MineHub.ItemESP = ItemESP
 

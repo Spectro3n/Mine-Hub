@@ -1,19 +1,16 @@
 -- ============================================================================
--- CONSTANTS.lua - Todas as constantes do sistema
+-- CONSTANTS - Todas as constantes do sistema
 -- ============================================================================
 
 local Constants = {}
 
--- Tecla de toggle principal
+Constants.VERSION = "5.0"
+Constants.BUILD = "modular"
+
 Constants.TOGGLE_KEY = Enum.KeyCode.R
-
--- ID da textura invisível
 Constants.INVISIBLE_ID = "75880927"
-
--- Auto desativar quando admin entrar
 Constants.AUTO_DISABLE_ON_ADMIN = true
 
--- Minerais detectáveis
 Constants.MINERALS = {
     ["88662911730235"] = {name = "Diamond", color = Color3.fromRGB(0, 170, 255), priority = 3},
     ["82164848622194"] = {name = "Iron", color = Color3.fromRGB(235, 235, 235), priority = 2},
@@ -21,7 +18,6 @@ Constants.MINERALS = {
     ["73240653680711"] = {name = "Coal", color = Color3.fromRGB(40, 40, 40), priority = 1},
 }
 
--- Lista de mobs conhecidos
 Constants.MOBS = {
     chicken = true, zombie = true, cow = true, pig = true,
     sheep = true, spider = true, skeleton = true, creeper = true,
@@ -40,14 +36,12 @@ Constants.MOBS = {
     cave_spider = true, iron_golem = true, snow_golem = true,
 }
 
--- Keywords para detecção de líquido (água/lava)
 Constants.LIQUID_KEYWORDS = {
     "Still", "Falling", "1", "1T", "2", "2T", "3", "3T",
     "4", "4T", "5", "5T", "6", "6T", "7", "7T", "7F",
     "1i", "2i", "3i", "4i", "5i", "6i", "7i",
 }
 
--- Cores padrão
 Constants.COLORS = {
     PLAYER = Color3.fromRGB(0, 255, 255),
     PLAYER_OUTLINE = Color3.fromRGB(0, 200, 255),
@@ -61,9 +55,5 @@ Constants.COLORS = {
     HEALTH_MID = Color3.fromRGB(255, 200, 80),
     HEALTH_LOW = Color3.fromRGB(255, 80, 80),
 }
-
--- Versão do sistema
-Constants.VERSION = "5.0"
-Constants.BUILD = "modular"
 
 return Constants

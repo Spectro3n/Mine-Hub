@@ -1,5 +1,5 @@
 -- ============================================================================
--- ALWAYS DAY - Força o dia sempre
+-- ALWAYS DAY
 -- ============================================================================
 
 local RunService = game:GetService("RunService")
@@ -17,22 +17,19 @@ function AlwaysDay:Enable()
     
     self._active = true
     
-    ConnectionManager:Add("alwaysDay", 
-        RunService.RenderStepped:Connect(function()
-            local worldInfo = workspace:FindFirstChild("WorldInfo")
-            if not worldInfo then return end
+    ConnectionManager:Add("alwaysDay", RunService.RenderStepped:Connect(function()
+        local worldInfo = workspace:FindFirstChild("WorldInfo")
+        if not worldInfo then return end
 
-            local clock = worldInfo:FindFirstChild("Clock")
-            if clock and (clock:IsA("NumberValue") or clock:IsA("IntValue")) then
-                if clock.Value ~= 1 then
-                    clock.Value = 1
-                end
+        local clock = worldInfo:FindFirstChild("Clock")
+        if clock and (clock:IsA("NumberValue") or clock:IsA("IntValue")) then
+            if clock.Value ~= 1 then
+                clock.Value = 1
             end
-        end), 
-        "world"
-    )
+        end
+    end), "world")
     
-    Notifications:Send("🌞 Sempre Dia", "Dia forçado ativado!", 2)
+    Notifications:Send("🌞 Sempre Dia", "Ativado!", 2)
 end
 
 function AlwaysDay:Disable()
@@ -41,12 +38,11 @@ function AlwaysDay:Disable()
     ConnectionManager:Remove("alwaysDay")
     self._active = false
     
-    Notifications:Send("🌞 Sempre Dia", "Ciclo normal restaurado", 2)
+    Notifications:Send("🌞 Sempre Dia", "Desativado", 2)
 end
 
 function AlwaysDay:Toggle(state)
     Config.AlwaysDay = state
-    
     if state then
         self:Enable()
     else
@@ -58,7 +54,6 @@ function AlwaysDay:IsActive()
     return self._active
 end
 
--- Expor globalmente
 _G.MineHub = _G.MineHub or {}
 _G.MineHub.AlwaysDay = AlwaysDay
 

@@ -1,5 +1,5 @@
 -- ============================================================================
--- ADMIN DETECTION - Detecção e ESP de administradores
+-- ADMIN DETECTION
 -- ============================================================================
 
 local Players = game:GetService("Players")
@@ -14,8 +14,8 @@ local Helpers = require("Utils/Helpers")
 local Notifications = require("UI/Notifications")
 
 local AdminDetection = {
-    _espCache = {},      -- player -> {highlight, billboard, conn, charConn}
-    _adminsOnline = {},  -- player -> true
+    _espCache = {},
+    _adminsOnline = {},
     _remote = nil,
 }
 
@@ -54,36 +54,28 @@ function AdminDetection:GetAdminsInServer()
     return admins
 end
 
-function AdminDetection:CreateESP(player)
+function AdminDetection:CreateESP(plr)
     if not Config.ShowAdminESP then return end
     if Config.SafeMode then return end
-    if self._espCache[player] then return end
-    if player == localPlayer then return end
+    if self._espCache[plr] then return end
+    if plr == localPlayer then return end
 
     local function apply(char)
         if not char then return end
         local hrp = char:WaitForChild("HumanoidRootPart", 5)
         if not hrp then return end
 
-        -- Limpar ESP anterior
-        if self._espCache[player] then
-            Helpers.SafeDestroy(self._espCache[player].hl)
-            Helpers.SafeDestroy(self._espCache[player].bb)
-            if self._espCache[player].conn then
-                self._espCache[player].conn:Disconnect()
+        if self._espCache[plr] then
+            Helpers.SafeDestroy(self._espCache[plr].hl)
+            Helpers.SafeDestroy(self._espCache[plr].bb)
+            if self._espCache[plr].conn then
+                self._espCache[plr].conn:Disconnect()
             end
         end
 
-        -- Highlight
-        local hl = Helpers.CreateHighlight(
-            char,
-            Constants.COLORS.ADMIN,
-            Constants.COLORS.ADMIN_OUTLINE,
-            0.25
-        )
+        local hl = Helpers.CreateHighlight(char, Constants.COLORS.ADMIN, Constants.COLORS.ADMIN_OUTLINE, 0.25)
         hl.Name = "AdminESP"
 
-        -- Billboard
         local bb = Instance.new("BillboardGui")
         bb.Name = "AdminBillboard"
         bb.Size = UDim2.fromOffset(180, 60)
@@ -102,55 +94,53 @@ function AdminDetection:CreateESP(player)
         lbl.Parent = bb
 
         local conn = RunService.RenderStepped:Connect(function()
-            if not player.Parent or not player.Character then
+            if not plr.Parent or not plr.Character then
                 conn:Disconnect()
                 return
             end
             local dist = Cache:GetDistanceFromCamera(hrp.Position)
-            lbl.Text = string.format("⚠️ ADMIN ⚠️\n👑 %s\n📏 %s", player.Name, Helpers.FormatDistance(dist))
+            lbl.Text = string.format("⚠️ ADMIN ⚠️\n👑 %s\n📏 %s", plr.Name, Helpers.FormatDistance(dist))
         end)
 
-        self._espCache[player] = {
+        self._espCache[plr] = {
             hl = hl,
             bb = bb,
             conn = conn
         }
     end
 
-    self._espCache[player] = {}
+    self._espCache[plr] = {}
     
-    local charConn = player.CharacterAdded:Connect(function(char)
+    local charConn = plr.CharacterAdded:Connect(function(char)
         task.wait(0.5)
         apply(char)
     end)
-    self._espCache[player].charConn = charConn
+    self._espCache[plr].charConn = charConn
 
-    if player.Character then
-        apply(player.Character)
+    if plr.Character then
+        apply(plr.Character)
     end
 end
 
-function AdminDetection:RemoveESP(player)
-    local data = self._espCache[player]
+function AdminDetection:RemoveESP(plr)
+    local data = self._espCache[plr]
     if not data then return end
     
     Helpers.SafeDestroy(data.hl)
     Helpers.SafeDestroy(data.bb)
-    
     if data.conn then data.conn:Disconnect() end
     if data.charConn then data.charConn:Disconnect() end
     
-    self._espCache[player] = nil
+    self._espCache[plr] = nil
 end
 
 function AdminDetection:ClearAllESP()
     local players = {}
-    for player in pairs(self._espCache) do
-        table.insert(players, player)
+    for plr in pairs(self._espCache) do
+        table.insert(players, plr)
     end
-    
-    for _, player in ipairs(players) do
-        self:RemoveESP(player)
+    for _, plr in ipairs(players) do
+        self:RemoveESP(plr)
     end
 end
 
@@ -164,19 +154,13 @@ function AdminDetection:Check()
         currentSet[admin] = true
     end
     
-    -- Detectar novos admins
     for _, admin in ipairs(currentAdmins) do
         if not self._adminsOnline[admin] then
             self._adminsOnline[admin] = true
             
-            Notifications:Send(
-                "⚠️ ADMIN DETECTADO!",
-                "👑 " .. admin.Name .. " entrou no servidor!",
-                5
-            )
+            Notifications:Send("⚠️ ADMIN DETECTADO!", "👑 " .. admin.Name .. " entrou no servidor!", 5)
             
             if Constants.AUTO_DISABLE_ON_ADMIN and Config.Enabled then
-                -- Desativar ESP principal
                 Config.Enabled = false
                 Notifications:Send("🛑 Auto-Disable", "ESP desativado por segurança!", 3)
             end
@@ -187,7 +171,6 @@ function AdminDetection:Check()
         end
     end
     
-    -- Detectar admins que saíram
     local toRemove = {}
     for admin in pairs(self._adminsOnline) do
         if not currentSet[admin] then
@@ -210,8 +193,8 @@ function AdminDetection:GetOnlineAdmins()
     return admins
 end
 
-function AdminDetection:IsAdmin(player)
-    return self._adminsOnline[player] == true
+function AdminDetection:IsAdmin(plr)
+    return self._adminsOnline[plr] == true
 end
 
 function AdminDetection:StartWatcher()
@@ -227,7 +210,6 @@ function AdminDetection:StartWatcher()
     end)
 end
 
--- Expor globalmente
 _G.MineHub = _G.MineHub or {}
 _G.MineHub.AdminDetection = AdminDetection
 

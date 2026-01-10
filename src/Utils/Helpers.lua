@@ -1,10 +1,9 @@
 -- ============================================================================
--- HELPERS - Funções utilitárias gerais
+-- HELPERS - Funções utilitárias
 -- ============================================================================
 
 local Helpers = {}
 
--- Limpar tabela de forma segura
 function Helpers.SafeTableClear(tbl, cleanupFunc)
     local keys = {}
     for key in pairs(tbl) do
@@ -20,19 +19,18 @@ function Helpers.SafeTableClear(tbl, cleanupFunc)
     end
 end
 
--- Verificar se decal corresponde a ID
 function Helpers.MatchDecal(decal, id)
     if not decal or not decal:IsA("Decal") then return false end
-    return decal.Texture:find(id) ~= nil
+    local texture = decal.Texture
+    if not texture then return false end
+    return string.find(texture, id, 1, true) ~= nil
 end
 
--- Obter Humanoid de um model
 function Helpers.GetHumanoid(model)
     if not model or not model:IsA("Model") then return nil end
     return model:FindFirstChildOfClass("Humanoid")
 end
 
--- Obter parte principal de um model
 function Helpers.GetPrimaryPart(model)
     if not model or not model:IsA("Model") then return nil end
     
@@ -43,15 +41,14 @@ function Helpers.GetPrimaryPart(model)
     return model:FindFirstChild("Hitbox") 
         or model:FindFirstChild("HumanoidRootPart") 
         or model:FindFirstChild("Head")
+        or model:FindFirstChildWhichIsA("BasePart")
 end
 
--- Calcular offset Y para billboard
 function Helpers.GetYOffset(part)
     if not part then return 3 end
     return (part.Size.Y / 2) + 1.5
 end
 
--- Criar BillboardGui padrão
 function Helpers.CreateBillboard(adornee, size, offset)
     local bb = Instance.new("BillboardGui")
     bb.AlwaysOnTop = true
@@ -62,7 +59,6 @@ function Helpers.CreateBillboard(adornee, size, offset)
     return bb
 end
 
--- Criar Highlight padrão
 function Helpers.CreateHighlight(adornee, fillColor, outlineColor, fillTransparency)
     local hl = Instance.new("Highlight")
     hl.FillColor = fillColor or Color3.new(1, 1, 1)
@@ -75,7 +71,6 @@ function Helpers.CreateHighlight(adornee, fillColor, outlineColor, fillTranspare
     return hl
 end
 
--- Criar Frame com cantos arredondados
 function Helpers.CreateRoundedFrame(parent, backgroundColor, transparency, cornerRadius)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.fromScale(1, 1)
@@ -91,7 +86,6 @@ function Helpers.CreateRoundedFrame(parent, backgroundColor, transparency, corne
     return frame
 end
 
--- Criar TextLabel padrão
 function Helpers.CreateTextLabel(parent, text, textColor, font, textSize)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.fromScale(1, 1)
@@ -105,26 +99,22 @@ function Helpers.CreateTextLabel(parent, text, textColor, font, textSize)
     return label
 end
 
--- Destruir objeto de forma segura
 function Helpers.SafeDestroy(obj)
-    if obj and obj.Parent then
+    if obj and typeof(obj) == "Instance" then
         pcall(function()
             obj:Destroy()
         end)
     end
 end
 
--- Verificar se instância é válida
 function Helpers.IsValid(instance)
-    return instance and instance.Parent ~= nil
+    return instance and typeof(instance) == "Instance" and instance.Parent ~= nil
 end
 
--- Formatar distância
 function Helpers.FormatDistance(distance)
     return string.format("%.0fm", distance)
 end
 
--- Formatar vida
 function Helpers.FormatHealth(health, maxHealth)
     if maxHealth and maxHealth > 0 then
         return string.format("%.0f/%.0f", health, maxHealth)
@@ -132,7 +122,6 @@ function Helpers.FormatHealth(health, maxHealth)
     return string.format("%.0f", health)
 end
 
--- Expor globalmente
 _G.MineHub = _G.MineHub or {}
 _G.MineHub.Helpers = Helpers
 
