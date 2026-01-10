@@ -1,8 +1,8 @@
 -- ============================================================================
 -- MINE-HUB LOADER v5.0
 -- ============================================================================
--- GitHub Repository: https://github.com/YOUR_USERNAME/Mine-Hub
--- Loadstring: loadstring(game:HttpGet("https://raw.githubusercontent.com/YOUR_USERNAME/Mine-Hub/main/loader.lua"))()
+-- GitHub Repository: https://github.com/Spectro3n/Mine-Hub
+-- Loadstring: loadstring(game:HttpGet("https://raw.githubusercontent.com/Spectro3n/Mine-Hub/main/loader.lua"))()
 -- ============================================================================
 
 local REPO_URL = "https://raw.githubusercontent.com/Spectro3n/Mine-Hub/main/src/"
@@ -40,7 +40,7 @@ end
 -- VERIFICAÇÃO DE JOGO
 -- ============================================================================
 local SUPPORTED_GAMES = {
-    [12916540959] = true, -- Minecraft (exemplo)
+    [132917556483884] = true, -- Minecraft (exemplo)
 }
 
 if not SUPPORTED_GAMES[game.PlaceId] then
