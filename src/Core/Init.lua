@@ -1,11 +1,5 @@
 -- ============================================================================
--- INIT v3.0 - Entry Point Principal (REFATORADO)
--- ============================================================================
--- ✅ Index de Entities para O(1) lookup
--- ✅ Config reativo (sem Heartbeat polling)
--- ✅ Inicialização segura e ordenada
--- ✅ FakeHitbox integrado
--- ✅ Separação de responsabilidades correta
+-- INIT v3.1 - Entry Point Principal (COM SAFE LOADING)
 -- ============================================================================
 
 print("🚀 Mine-Hub v5.0 - Iniciando...")
@@ -17,10 +11,27 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- ============================================================================
--- CONFIGURAÇÃO DE DEBUG
+-- SAFE REQUIRE (CARREGAMENTO SEGURO)
 -- ============================================================================
 
-local DEBUG_MODE = false -- Mudar para true durante desenvolvimento
+local function safeRequire(path)
+    local success, result = pcall(function()
+        return require(path)
+    end)
+    
+    if success then
+        return result, nil
+    else
+        warn("[MineHub] Falha ao carregar módulo:", path, "-", tostring(result))
+        return nil, result
+    end
+end
+
+-- ============================================================================
+-- DEBUG MODE
+-- ============================================================================
+
+local DEBUG_MODE = false
 
 local function log(...)
     if DEBUG_MODE then
@@ -33,46 +44,120 @@ local function logError(...)
 end
 
 -- ============================================================================
--- CARREGAR MÓDULOS (ORDEM IMPORTA)
+-- CARREGAR MÓDULOS CORE (OBRIGATÓRIOS)
 -- ============================================================================
 
--- Core primeiro
 local Constants = require("Core/Constants")
 local Config = require("Core/Config")
 
--- Engine (Cache precisa ser primeiro)
+-- ============================================================================
+-- CARREGAR MÓDULOS ENGINE (COM FALLBACK)
+-- ============================================================================
+
 local Cache = require("Engine/Cache")
 local ConnectionManager = require("Engine/ConnectionManager")
-local ObjectPool = require("Engine/ObjectPool")
-local FakeHitbox = require("Engine/FakeHitbox")
+local ObjectPool, _ = safeRequire("Engine/ObjectPool")
 
--- Utils
+-- FakeHitbox é OPCIONAL - sistema funciona sem ele
+local FakeHitbox, fakeHitboxErr = safeRequire("Engine/FakeHitbox")
+if not FakeHitbox then
+    -- Criar stub vazio para não quebrar o código
+    FakeHitbox = {
+        Create = function() return nil end,
+        Remove = function() return false end,
+        RemoveAll = function() return 0 end,
+        Has = function() return false end,
+        Get = function() return nil end,
+        UpdateSize = function() return nil end,
+        StartAutoCleanup = function() end,
+        StopAutoCleanup = function() end,
+        ToggleVisuals = function() end,
+        Configure = function() end,
+        GetConfig = function() return {} end,
+        GetMetrics = function() return { totalCreated = 0, totalRemoved = 0, currentActive = 0 } end,
+        GetCount = function() return 0 end,
+        _active = {},
+    }
+    log("FakeHitbox não disponível, usando stub")
+end
+
+-- ============================================================================
+-- CARREGAR UTILS
+-- ============================================================================
+
 local Helpers = require("Utils/Helpers")
+local Detection, _ = safeRequire("Utils/Detection")
 
--- UI (Notifications primeiro)
-local Notifications = require("UI/Notifications")
+-- Se Detection não existir, criar stub básico
+if not Detection then
+    Detection = {
+        IsItem = function(model)
+            if not model or not model:IsA("Model") then return false end
+            return tonumber(model.Name) ~= nil and not model:FindFirstChildOfClass("Humanoid")
+        end,
+        IsMob = function(model)
+            if not model or not model:IsA("Model") then return false end
+            return model:FindFirstChild("Hitbox") ~= nil or model:FindFirstChildOfClass("Humanoid") ~= nil
+        end,
+        IsPlayer = function(model)
+            return Players:GetPlayerFromCharacter(model) ~= nil
+        end,
+    }
+end
 
--- Features
+-- ============================================================================
+-- CARREGAR UI
+-- ============================================================================
+
+local Notifications, _ = safeRequire("UI/Notifications")
+if not Notifications then
+    Notifications = {
+        Send = function(title, msg, duration)
+            print("[Notification]", title, "-", msg)
+        end,
+        SetRayfield = function() end,
+    }
+end
+
+-- ============================================================================
+-- CARREGAR FEATURES (COM FALLBACK)
+-- ============================================================================
+
 local MineralESP = require("Features/MineralESP")
-local PlayerESP = require("Features/PlayerESP")
-local MobESP = require("Features/MobESP")
-local ItemESP = require("Features/ItemESP")
-local AdminDetection = require("Features/AdminDetection")
-local WaterWalk = require("Features/WaterWalk")
-local AlwaysDay = require("Features/AlwaysDay")
-local Hitbox = require("Features/Hitbox")
+local PlayerESP, _ = safeRequire("Features/PlayerESP")
+local MobESP, _ = safeRequire("Features/MobESP")
+local ItemESP, _ = safeRequire("Features/ItemESP")
+local AdminDetection, _ = safeRequire("Features/AdminDetection")
+local WaterWalk, _ = safeRequire("Features/WaterWalk")
+local AlwaysDay, _ = safeRequire("Features/AlwaysDay")
+local Hitbox, _ = safeRequire("Features/Hitbox")
 
--- UI principal (por último)
-local RayfieldUI = require("UI/RayfieldUI")
+-- Criar stubs para módulos não carregados
+PlayerESP = PlayerESP or { Update = function() end, ClearAll = function() end, Refresh = function() end }
+MobESP = MobESP or { Update = function() end, ClearAll = function() end, OnEntityData = function() end }
+ItemESP = ItemESP or { Init = function() end, Enable = function() end, Disable = function() end, ClearAll = function() end, Refresh = function() end, GetCount = function() return 0 end, GetMetrics = function() return {} end, IsInitialized = function() return false end }
+AdminDetection = AdminDetection or { Init = function() end, Check = function() end, StartWatcher = function() end, ClearAllESP = function() end, GetOnlineAdmins = function() return {} end }
+WaterWalk = WaterWalk or { Toggle = function() end }
+AlwaysDay = AlwaysDay or { Toggle = function() end }
+Hitbox = Hitbox or { Init = function() end, StartUpdateLoop = function() end, StopUpdateLoop = function() end, ClearAllESP = function() end, RestoreAll = function() end, GetMetrics = function() return {} end }
+
+-- ============================================================================
+-- CARREGAR UI PRINCIPAL
+-- ============================================================================
+
+local RayfieldUI, _ = safeRequire("UI/RayfieldUI")
+if not RayfieldUI then
+    RayfieldUI = { Create = function() end, GetWindow = function() return nil end }
+end
 
 local player = Players.LocalPlayer
 
 -- ============================================================================
--- ENTITY INDEX (PARA O(1) LOOKUP)
+-- ENTITY INDEX
 -- ============================================================================
 
 local EntityIndex = {
-    _index = {},           -- name/id -> model
+    _index = {},
     _folder = nil,
     _initialized = false,
 }
@@ -88,8 +173,6 @@ function EntityIndex:Init()
             if self._folder then
                 self:_setupConnections()
                 self:_buildIndex()
-            else
-                logError("Pasta Entities não encontrada após 60s")
             end
         end)
         return
@@ -98,7 +181,6 @@ function EntityIndex:Init()
     self:_setupConnections()
     self:_buildIndex()
     self._initialized = true
-    log("EntityIndex inicializado")
 end
 
 function EntityIndex:_setupConnections()
@@ -107,13 +189,11 @@ function EntityIndex:_setupConnections()
     ConnectionManager:Add("entityIndex_added", self._folder.ChildAdded:Connect(function(model)
         if model:IsA("Model") then
             self._index[model.Name] = model
-            log("Entity adicionada ao index:", model.Name)
         end
     end), "entityIndex")
     
     ConnectionManager:Add("entityIndex_removed", self._folder.ChildRemoved:Connect(function(model)
         self._index[model.Name] = nil
-        log("Entity removida do index:", model.Name)
     end), "entityIndex")
 end
 
@@ -126,8 +206,6 @@ function EntityIndex:_buildIndex()
             self._index[model.Name] = model
         end
     end
-    
-    log("EntityIndex construído com", self:GetCount(), "entities")
 end
 
 function EntityIndex:Get(nameOrId)
@@ -151,22 +229,21 @@ function EntityIndex:Rebuild()
 end
 
 -- ============================================================================
--- CONFIG REATIVO (SEM HEARTBEAT POLLING)
+-- CONFIG WATCHER
 -- ============================================================================
 
 local ConfigWatcher = {
     _listeners = {},
     _lastValues = {},
+    _frameCount = 0,
 }
 
 function ConfigWatcher:Init()
-    -- Capturar valores iniciais
     for key, value in pairs(Config) do
         if type(value) ~= "function" then
             self._lastValues[key] = value
         end
     end
-    log("ConfigWatcher inicializado")
 end
 
 function ConfigWatcher:Watch(key, callback)
@@ -175,9 +252,10 @@ function ConfigWatcher:Watch(key, callback)
     end
     table.insert(self._listeners[key], callback)
     
-    -- Executar callback com valor atual
     if Config[key] ~= nil then
-        callback(Config[key])
+        task.spawn(function()
+            pcall(callback, Config[key])
+        end)
     end
 end
 
@@ -196,20 +274,13 @@ function ConfigWatcher:_notify(key, newValue, oldValue)
     
     for _, callback in ipairs(listeners) do
         task.spawn(function()
-            local success, err = pcall(callback, newValue, oldValue)
-            if not success then
-                logError("ConfigWatcher callback error:", key, err)
-            end
+            pcall(callback, newValue, oldValue)
         end)
     end
 end
 
--- Checar mudanças periodicamente (fallback, menos frequente)
 function ConfigWatcher:StartPolling()
-    -- Polling a cada 0.5s em vez de cada frame
     ConnectionManager:Add("configWatcher_poll", RunService.Heartbeat:Connect(function()
-        -- Throttle: só checar a cada 30 frames (~0.5s)
-        if not self._frameCount then self._frameCount = 0 end
         self._frameCount = self._frameCount + 1
         if self._frameCount < 30 then return end
         self._frameCount = 0
@@ -225,17 +296,15 @@ function ConfigWatcher:StartPolling()
 end
 
 -- ============================================================================
--- INICIALIZAÇÃO SEGURA
+-- SAFE INIT HELPER
 -- ============================================================================
 
 local function safeInit(name, initFn, options)
     options = options or {}
-    local delay = options.delay or 0
-    local required = options.required or false
     
     local function doInit()
-        if delay > 0 then
-            task.wait(delay)
+        if options.delay and options.delay > 0 then
+            task.wait(options.delay)
         end
         
         local success, err = pcall(initFn)
@@ -244,11 +313,7 @@ local function safeInit(name, initFn, options)
             log("✅", name, "inicializado")
             return true
         else
-            if required then
-                logError("❌", name, "FALHOU (CRÍTICO):", err)
-            else
-                logError("⚠️", name, "falhou:", err)
-            end
+            logError("❌", name, "falhou:", err)
             return false
         end
     end
@@ -261,7 +326,7 @@ local function safeInit(name, initFn, options)
 end
 
 -- ============================================================================
--- UPDATEWORLD INTERCEPTOR (OTIMIZADO)
+-- UPDATEWORLD INTERCEPTOR
 -- ============================================================================
 
 local function setupUpdateWorldInterceptor()
@@ -277,46 +342,33 @@ local function setupUpdateWorldInterceptor()
     end
     
     ConnectionManager:Add("updateWorld", UpdateWorld.OnClientEvent:Connect(function(data)
-        -- Early exits
         if not Config.ShowHealth then return end
         if Config.SafeMode then return end
         if typeof(data) ~= "table" then return end
         
-        -- ═══════════════════════════════════════════════
-        -- PROCESSAR PLAYERS (O(n) simples)
-        -- ═══════════════════════════════════════════════
+        -- Processar Players
         if data.players and Config.PlayerESP then
             for _, info in ipairs(data.players) do
                 if info.Player and info.Health and info.Player ~= player then
-                    -- Apenas armazenar dados no Cache
-                    -- PlayerESP decide como renderizar
                     Cache:SetRealHealth(info.Player, info.Health, info.MaxHealth or 20)
                     
-                    -- Notificar PlayerESP (se estiver ativo)
-                    if PlayerESP.OnHealthUpdate then
-                        PlayerESP:OnHealthUpdate(info.Player, info.Health, info.MaxHealth or 20)
-                    else
+                    if PlayerESP and PlayerESP.Update then
                         PlayerESP:Update(info.Player, info.Health, info.MaxHealth or 20)
                     end
                 end
             end
         end
         
-        -- ═══════════════════════════════════════════════
-        -- PROCESSAR ENTITIES (O(n) com index O(1))
-        -- ═══════════════════════════════════════════════
+        -- Processar Entities
         if data.chunks then
             for _, chunk in ipairs(data.chunks) do
                 local chunkData = chunk[3]
                 if chunkData and chunkData.entitydata then
                     for _, ent in ipairs(chunkData.entitydata) do
                         if ent.UUID and ent.id then
-                            -- ✅ O(1) lookup em vez de O(n)
                             local model = EntityIndex:Get(ent.id)
                             
                             if model then
-                                -- Apenas armazenar dados no Cache
-                                -- ESPs decidem como renderizar
                                 Cache:SetEntityData(model, {
                                     uuid = ent.UUID,
                                     health = ent.Health,
@@ -325,15 +377,8 @@ local function setupUpdateWorldInterceptor()
                                     lastUpdate = tick(),
                                 })
                                 
-                                -- ❌ NÃO decidir aqui se é item ou mob
-                                -- Os ESPs fazem isso no próprio scan
-                                
-                                -- Apenas notificar MobESP se tiver health
-                                if ent.Health and Config.MobESP then
-                                    -- Deixar MobESP decidir se é mob
-                                    if MobESP.OnEntityData then
-                                        MobESP:OnEntityData(model, ent)
-                                    end
+                                if ent.Health and Config.MobESP and MobESP and MobESP.OnEntityData then
+                                    MobESP:OnEntityData(model, ent)
                                 end
                             end
                         end
@@ -348,20 +393,14 @@ local function setupUpdateWorldInterceptor()
 end
 
 -- ============================================================================
--- CACHE UPDATE LOOP
+-- SETUP FUNCTIONS
 -- ============================================================================
 
 local function setupCacheUpdateLoop()
     ConnectionManager:Add("cacheUpdate", RunService.Heartbeat:Connect(function(deltaTime)
         Cache:Update(deltaTime)
     end), "system")
-    
-    log("Cache update loop ativo")
 end
-
--- ============================================================================
--- INPUT HANDLER
--- ============================================================================
 
 local function setupInputHandler()
     ConnectionManager:Add("inputBegan", UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -370,74 +409,55 @@ local function setupInputHandler()
         if input.KeyCode == Constants.TOGGLE_KEY then
             MineralESP:Toggle()
         end
-        
-        -- Debug key (F9)
-        if DEBUG_MODE and input.KeyCode == Enum.KeyCode.F9 then
-            print("=== DEBUG INFO ===")
-            print("EntityIndex count:", EntityIndex:GetCount())
-            print("Cache metrics:", Cache:GetMetrics())
-            print("ItemESP count:", ItemESP:GetCount())
-            print("Hitbox metrics:", Hitbox:GetMetrics())
-            print("==================")
-        end
     end), "general")
-    
-    log("Input handler configurado")
 end
 
--- ============================================================================
--- SETUP CONFIG WATCHERS
--- ============================================================================
-
 local function setupConfigWatchers()
-    -- ItemESP
     ConfigWatcher:Watch("ItemESP", function(enabled)
         if enabled then
-            if ItemESP:IsInitialized() then
+            if ItemESP.IsInitialized and ItemESP:IsInitialized() then
                 ItemESP:Enable()
-            else
+            elseif ItemESP.Init then
                 ItemESP:Init()
             end
         else
-            ItemESP:Disable()
+            if ItemESP.Disable then
+                ItemESP:Disable()
+            end
         end
     end)
     
-    -- Hitbox ESP
     ConfigWatcher:Watch("ShowHitboxESP", function(enabled)
         if enabled then
-            Hitbox:StartUpdateLoop()
+            if Hitbox.StartUpdateLoop then Hitbox:StartUpdateLoop() end
         else
-            Hitbox:ClearAllESP()
+            if Hitbox.ClearAllESP then Hitbox:ClearAllESP() end
         end
     end)
     
-    -- Expand Hitbox
     ConfigWatcher:Watch("ExpandHitbox", function(enabled)
         if enabled then
-            Hitbox:StartUpdateLoop()
+            if Hitbox.StartUpdateLoop then Hitbox:StartUpdateLoop() end
         else
-            Hitbox:RestoreAll()
+            if Hitbox.RestoreAll then Hitbox:RestoreAll() end
         end
     end)
     
-    -- SafeMode
     ConfigWatcher:Watch("SafeMode", function(enabled)
         if enabled then
-            -- Desativar tudo
-            MineralESP:Disable()
-            PlayerESP:ClearAll()
-            MobESP:ClearAll()
-            ItemESP:Disable()
-            Hitbox:ClearAllESP()
-            Hitbox:RestoreAll()
-            FakeHitbox:RemoveAll()
-            AdminDetection:ClearAllESP()
+            if MineralESP.Disable then MineralESP:Disable() end
+            if PlayerESP.ClearAll then PlayerESP:ClearAll() end
+            if MobESP.ClearAll then MobESP:ClearAll() end
+            if ItemESP.Disable then ItemESP:Disable() end
+            if Hitbox.ClearAllESP then Hitbox:ClearAllESP() end
+            if Hitbox.RestoreAll then Hitbox:RestoreAll() end
+            if FakeHitbox.RemoveAll then FakeHitbox:RemoveAll() end
+            if AdminDetection.ClearAllESP then AdminDetection:ClearAllESP() end
             
-            if Config.AlwaysDay then
+            if Config.AlwaysDay and AlwaysDay.Toggle then
                 AlwaysDay:Toggle(false)
             end
-            if Config.WaterWalk then
+            if Config.WaterWalk and WaterWalk.Toggle then
                 WaterWalk:Toggle(false)
             end
             
@@ -445,67 +465,63 @@ local function setupConfigWatchers()
         end
     end)
     
-    -- Iniciar polling como fallback
     ConfigWatcher:StartPolling()
-    
-    log("Config watchers configurados")
 end
 
 -- ============================================================================
--- INICIALIZAÇÃO DAS FEATURES
+-- INITIALIZE FEATURES
 -- ============================================================================
 
 local function initializeFeatures()
-    -- ═══════════════════════════════════════════════
-    -- HITBOX + FAKEHITBOX (inicializar primeiro)
-    -- ═══════════════════════════════════════════════
+    -- FakeHitbox
     safeInit("FakeHitbox", function()
-        FakeHitbox:StartAutoCleanup()
+        if FakeHitbox.StartAutoCleanup then
+            FakeHitbox:StartAutoCleanup()
+        end
     end)
     
+    -- Hitbox
     safeInit("Hitbox", function()
-        Hitbox:Init()
+        if Hitbox.Init then
+            Hitbox:Init()
+        end
     end)
     
-    -- ═══════════════════════════════════════════════
-    -- ITEM ESP
-    -- ═══════════════════════════════════════════════
+    -- ItemESP
     safeInit("ItemESP", function()
-        if Config.ItemESP then
+        if Config.ItemESP and ItemESP.Init then
             ItemESP:Init()
         end
     end, { async = true, delay = 0.3 })
     
-    -- ═══════════════════════════════════════════════
-    -- ADMIN DETECTION
-    -- ═══════════════════════════════════════════════
+    -- AdminDetection
     safeInit("AdminDetection", function()
-        AdminDetection:Init()
-        AdminDetection:Check()
-        AdminDetection:StartWatcher()
+        if AdminDetection.Init then
+            AdminDetection:Init()
+            if AdminDetection.Check then AdminDetection:Check() end
+            if AdminDetection.StartWatcher then AdminDetection:StartWatcher() end
+        end
     end, { async = true, delay = 1 })
     
-    -- ═══════════════════════════════════════════════
-    -- UI (RAYFIELD)
-    -- ═══════════════════════════════════════════════
+    -- UI
     safeInit("RayfieldUI", function()
-        RayfieldUI:Create()
+        if RayfieldUI.Create then
+            RayfieldUI:Create()
+        end
     end, { async = true, delay = 0.5 })
 end
 
 -- ============================================================================
--- MAIN INITIALIZATION
+-- MAIN
 -- ============================================================================
 
 local function main()
     local startTime = tick()
     
-    -- ═══════════════════════════════════════════════
-    -- FASE 1: Core Systems (síncrono)
-    -- ═══════════════════════════════════════════════
+    -- Fase 1: Core
     safeInit("Cache", function()
-        Cache:Init()
-    end, { required = true })
+        if Cache.Init then Cache:Init() end
+    end)
     
     safeInit("ConfigWatcher", function()
         ConfigWatcher:Init()
@@ -515,27 +531,21 @@ local function main()
         EntityIndex:Init()
     end)
     
-    -- ═══════════════════════════════════════════════
-    -- FASE 2: Connections (síncrono)
-    -- ═══════════════════════════════════════════════
+    -- Fase 2: Connections
     setupCacheUpdateLoop()
     setupUpdateWorldInterceptor()
     setupInputHandler()
     setupConfigWatchers()
     
-    -- ═══════════════════════════════════════════════
-    -- FASE 3: Features (assíncrono)
-    -- ═══════════════════════════════════════════════
+    -- Fase 3: Features
     initializeFeatures()
     
-    -- ═══════════════════════════════════════════════
-    -- CONCLUÍDO
-    -- ═══════════════════════════════════════════════
+    -- Done
     local loadTime = tick() - startTime
     
     print("═══════════════════════════════════════════════")
     print("✅ Mine-Hub v" .. Constants.VERSION .. " carregado!")
-    print("⏱️ Tempo de carregamento: " .. string.format("%.2fms", loadTime * 1000))
+    print("⏱️ Tempo: " .. string.format("%.2fms", loadTime * 1000))
     print("📦 Pressione R para ativar | K para menu")
     print("═══════════════════════════════════════════════")
 end
@@ -544,145 +554,56 @@ end
 main()
 
 -- ============================================================================
--- API GLOBAL (ENCAPSULADA)
+-- API GLOBAL
 -- ============================================================================
 
 _G.MineHub = _G.MineHub or {}
 _G.MineHub.Version = Constants.VERSION
 
--- API Pública (segura)
 _G.MineHub.API = {
-    -- Toggles
-    ToggleMineralESP = function()
-        MineralESP:Toggle()
-    end,
-    
-    ToggleItemESP = function(state)
-        ConfigWatcher:Set("ItemESP", state)
-    end,
-    
-    ToggleHitbox = function(state)
-        ConfigWatcher:Set("ShowHitboxESP", state)
-    end,
-    
-    ToggleSafeMode = function(state)
-        ConfigWatcher:Set("SafeMode", state)
-    end,
-    
-    -- Getters
-    IsInitialized = function()
-        return Cache._initialized and EntityIndex._initialized
-    end,
-    
-    GetVersion = function()
-        return Constants.VERSION
-    end,
+    ToggleMineralESP = function() MineralESP:Toggle() end,
+    ToggleItemESP = function(state) ConfigWatcher:Set("ItemESP", state) end,
+    ToggleHitbox = function(state) ConfigWatcher:Set("ShowHitboxESP", state) end,
+    ToggleSafeMode = function(state) ConfigWatcher:Set("SafeMode", state) end,
+    GetVersion = function() return Constants.VERSION end,
 }
 
--- Debug API (separada)
 _G.MineHub.Debug = {
-    -- Métricas
-    GetCacheMetrics = function()
-        return Cache:GetMetrics()
-    end,
-    
-    GetCacheSizes = function()
-        return Cache:GetCacheSizes()
-    end,
-    
-    GetItemESPMetrics = function()
-        return ItemESP:GetMetrics()
-    end,
-    
-    GetHitboxMetrics = function()
-        return Hitbox:GetMetrics()
-    end,
-    
-    GetFakeHitboxMetrics = function()
-        return FakeHitbox:GetMetrics()
-    end,
-    
-    GetEntityIndexCount = function()
-        return EntityIndex:GetCount()
-    end,
-    
-    GetConnectionsMetrics = function()
-        return ConnectionManager:GetMetrics()
-    end,
-    
-    -- Ações
-    RefreshItemESP = function()
-        ItemESP:Refresh()
-    end,
-    
-    RefreshEntityIndex = function()
-        EntityIndex:Rebuild()
-    end,
-    
-    ClearAllCaches = function()
-        Cache:ClearAll()
-        Helpers.ClearCache()
-    end,
-    
-    ForceCleanup = function()
-        ConnectionManager:ForceCleanup()
-        FakeHitbox:RemoveAll()
-        Hitbox:RestoreAll()
-    end,
-    
-    -- Debug mode
-    SetDebugMode = function(enabled)
-        DEBUG_MODE = enabled
-    end,
-    
-    -- Listar tudo
-    ListTrackedItems = function()
-        return ItemESP:GetTrackedItems()
-    end,
-    
-    ListEntities = function()
-        return EntityIndex:GetAll()
-    end,
+    GetCacheMetrics = function() return Cache.GetMetrics and Cache:GetMetrics() or {} end,
+    GetItemESPMetrics = function() return ItemESP.GetMetrics and ItemESP:GetMetrics() or {} end,
+    GetHitboxMetrics = function() return Hitbox.GetMetrics and Hitbox:GetMetrics() or {} end,
+    GetFakeHitboxMetrics = function() return FakeHitbox.GetMetrics and FakeHitbox:GetMetrics() or {} end,
+    GetEntityIndexCount = function() return EntityIndex:GetCount() end,
+    RefreshItemESP = function() if ItemESP.Refresh then ItemESP:Refresh() end end,
+    RefreshEntityIndex = function() EntityIndex:Rebuild() end,
+    SetDebugMode = function(enabled) DEBUG_MODE = enabled end,
 }
 
 -- ============================================================================
--- CLEANUP ON LEAVE
+-- CLEANUP
 -- ============================================================================
 
 game:BindToClose(function()
-    log("Limpando antes de fechar...")
     ConnectionManager:RemoveAll()
-    FakeHitbox:RemoveAll()
-    Hitbox:RestoreAll()
+    if FakeHitbox.RemoveAll then FakeHitbox:RemoveAll() end
+    if Hitbox.RestoreAll then Hitbox:RestoreAll() end
 end)
 
 -- ============================================================================
--- RETURN MODULE
+-- RETURN
 -- ============================================================================
 
 return {
-    -- Core
     Config = Config,
     Constants = Constants,
     Cache = Cache,
-    
-    -- Engine
     ConnectionManager = ConnectionManager,
-    ObjectPool = ObjectPool,
     FakeHitbox = FakeHitbox,
     EntityIndex = EntityIndex,
-    
-    -- Features
     MineralESP = MineralESP,
     PlayerESP = PlayerESP,
     MobESP = MobESP,
     ItemESP = ItemESP,
-    AdminDetection = AdminDetection,
-    WaterWalk = WaterWalk,
-    AlwaysDay = AlwaysDay,
     Hitbox = Hitbox,
-    
-    -- Utils
     Helpers = Helpers,
-    ConfigWatcher = ConfigWatcher,
 }
