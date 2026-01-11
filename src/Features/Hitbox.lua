@@ -1,5 +1,11 @@
 -- ============================================================================
--- HITBOX v2.0 - Integrado com Helpers e Sistema de Tracking
+-- HITBOX v2.1 - Sistema Completo com FakeHitbox para Players
+-- ============================================================================
+-- ✅ Player → FakeHitbox (soldada ao HRP)
+-- ✅ Animal/NPC → Hitbox real expandida
+-- ✅ Item → Não expande
+-- ✅ CanQuery = true sempre
+-- ✅ ESP separado de hitbox real
 -- ============================================================================
 
 local RunService = game:GetService("RunService")
@@ -10,35 +16,44 @@ local Constants = require("Core/Constants")
 local Helpers = require("Utils/Helpers")
 local ConnectionManager = require("Engine/ConnectionManager")
 local Cache = require("Engine/Cache")
+local FakeHitbox = require("Engine/FakeHitbox")
 
 local Hitbox = {
     -- ═══════════════════════════════════════════════
-    -- CACHE DE ESP E TAMANHOS
+    -- CACHE DE ESP (VISUAL ONLY)
     -- ═══════════════════════════════════════════════
     _espCache = {},           -- part -> BoxHandleAdornment
-    _originalSizes = {},      -- part -> Vector3
-    _trackedEntities = {},    -- model -> {parts = {}, type = string}
     
     -- ═══════════════════════════════════════════════
-    -- CORES POR TIPO DE ENTIDADE
+    -- CACHE DE EXPANSÃO REAL (PARA MOBS/ANIMALS)
+    -- ═══════════════════════════════════════════════
+    _originalSizes = {},      -- part -> Vector3
+    _expandedParts = {},      -- part -> true
+    
+    -- ═══════════════════════════════════════════════
+    -- TRACKING DE ENTIDADES
+    -- ═══════════════════════════════════════════════
+    _trackedEntities = {},    -- model -> {type, hitbox, hasESP, isExpanded}
+    
+    -- ═══════════════════════════════════════════════
+    -- CORES POR TIPO
     -- ═══════════════════════════════════════════════
     _colors = {
-        Player = Color3.fromRGB(255, 0, 0),      -- Vermelho
-        Animal = Color3.fromRGB(255, 165, 0),    -- Laranja
-        Mob = Color3.fromRGB(255, 100, 100),     -- Vermelho claro
-        Item = Color3.fromRGB(255, 255, 0),      -- Amarelo
-        Unknown = Color3.fromRGB(255, 255, 255), -- Branco
+        [Helpers.EntityTypes.PLAYER] = Color3.fromRGB(255, 0, 0),      -- Vermelho
+        [Helpers.EntityTypes.NPC] = Color3.fromRGB(255, 100, 100),     -- Rosa
+        [Helpers.EntityTypes.ANIMAL] = Color3.fromRGB(255, 165, 0),    -- Laranja
+        [Helpers.EntityTypes.ITEM] = Color3.fromRGB(255, 255, 0),      -- Amarelo
+        [Helpers.EntityTypes.UNKNOWN] = Color3.fromRGB(255, 255, 255), -- Branco
     },
     
     -- ═══════════════════════════════════════════════
     -- CONFIGURAÇÃO
     -- ═══════════════════════════════════════════════
     _config = {
-        updateInterval = 0.1,      -- Segundos entre updates
-        autoTrackPlayers = true,   -- Auto-track de players
-        autoTrackMobs = true,      -- Auto-track de mobs
-        showOutline = true,        -- Mostrar outline da box
-        adaptiveSize = false,      -- Tamanho adaptativo por tipo
+        autoTrackPlayers = true,
+        autoTrackMobs = true,
+        showVisualForFake = false,  -- Mostrar visual do FakeHitbox
+        updateInterval = 0.1,
     },
     
     -- ═══════════════════════════════════════════════
@@ -51,11 +66,11 @@ local Hitbox = {
     -- MÉTRICAS
     -- ═══════════════════════════════════════════════
     _metrics = {
-        totalCreated = 0,
-        totalRemoved = 0,
-        totalExpanded = 0,
-        totalRestored = 0,
-        currentTracked = 0,
+        espCreated = 0,
+        espRemoved = 0,
+        mobsExpanded = 0,
+        mobsRestored = 0,
+        playersWithFake = 0,
         lastUpdateTime = 0,
     },
 }
@@ -69,7 +84,10 @@ local player = Players.LocalPlayer
 function Hitbox:Init()
     if self._initialized then return end
     
-    -- Iniciar loop de update se auto-track está ativado
+    -- Iniciar FakeHitbox cleanup
+    FakeHitbox:StartAutoCleanup()
+    
+    -- Iniciar loop se auto-track está ativado
     if self._config.autoTrackPlayers or self._config.autoTrackMobs then
         self:StartUpdateLoop()
     end
@@ -78,7 +96,7 @@ function Hitbox:Init()
 end
 
 -- ============================================================================
--- CRIAR ESP (MELHORADO)
+-- CRIAR ESP (VISUAL ONLY - NÃO AFETA HIT)
 -- ============================================================================
 
 function Hitbox:CreateESP(part, color, entityType)
@@ -86,10 +104,10 @@ function Hitbox:CreateESP(part, color, entityType)
     if not Helpers.IsValid(part) then return nil end
     if self._espCache[part] then return self._espCache[part] end
     
-    -- Determinar cor baseada no tipo de entidade
+    -- Determinar cor
     if not color then
         entityType = entityType or Helpers.GetEntityType(part.Parent or part)
-        color = self._colors[entityType] or self._colors.Unknown
+        color = self._colors[entityType] or self._colors[Helpers.EntityTypes.UNKNOWN]
     end
     
     -- Criar BoxHandleAdornment
@@ -101,64 +119,37 @@ function Hitbox:CreateESP(part, color, entityType)
     box.ZIndex = 5
     box.Transparency = 0.6
     box.Color3 = color
-    
-    -- Parent seguro
     box.Parent = part
     
     self._espCache[part] = box
-    self._metrics.totalCreated = self._metrics.totalCreated + 1
+    self._metrics.espCreated = self._metrics.espCreated + 1
     
     return box
 end
 
--- Criar ESP para entidade completa (Model)
+-- Criar ESP para entidade (usa hitbox visual)
 function Hitbox:CreateESPForEntity(entity, color)
-    if not entity then return {} end
-    if not Helpers.IsValid(entity) then return {} end
+    if not entity then return nil end
+    if not Helpers.IsValid(entity) then return nil end
     
-    local created = {}
     local entityType = Helpers.GetEntityType(entity)
-    color = color or self._colors[entityType] or self._colors.Unknown
+    local hitbox = Helpers.GetVisualHitbox(entity)
     
-    -- Se for Model, criar para a hitbox principal
-    if entity:IsA("Model") then
-        local hitbox = Helpers.GetHitbox(entity)
-        if hitbox then
-            local esp = self:CreateESP(hitbox, color, entityType)
-            if esp then
-                table.insert(created, esp)
-            end
-        end
-        
-        -- Opcionalmente, criar para todas as partes
-        if self._config.showAllParts then
-            for _, child in ipairs(entity:GetDescendants()) do
-                if child:IsA("BasePart") and child ~= hitbox then
-                    local esp = self:CreateESP(child, color, entityType)
-                    if esp then
-                        table.insert(created, esp)
-                    end
-                end
-            end
-        end
-    elseif entity:IsA("BasePart") then
-        local esp = self:CreateESP(entity, color, entityType)
-        if esp then
-            table.insert(created, esp)
-        end
-    end
+    if not hitbox then return nil end
+    
+    color = color or self._colors[entityType]
+    
+    local esp = self:CreateESP(hitbox, color, entityType)
     
     -- Registrar tracking
-    if #created > 0 then
-        self._trackedEntities[entity] = {
-            parts = created,
-            type = entityType,
-            createdAt = tick(),
-        }
-        self._metrics.currentTracked = self._metrics.currentTracked + 1
+    if esp then
+        self._trackedEntities[entity] = self._trackedEntities[entity] or {}
+        self._trackedEntities[entity].hasESP = true
+        self._trackedEntities[entity].type = entityType
+        self._trackedEntities[entity].hitbox = hitbox
     end
     
-    return created
+    return esp
 end
 
 -- ============================================================================
@@ -170,26 +161,22 @@ function Hitbox:RemoveESP(part)
     if box then
         Helpers.SafeDestroy(box)
         self._espCache[part] = nil
-        self._metrics.totalRemoved = self._metrics.totalRemoved + 1
+        self._metrics.espRemoved = self._metrics.espRemoved + 1
         return true
     end
     return false
 end
 
--- Remover ESP de entidade completa
 function Hitbox:RemoveESPForEntity(entity)
-    if not entity then return 0 end
+    if not entity then return false end
     
     local tracking = self._trackedEntities[entity]
-    if tracking then
-        for _, esp in ipairs(tracking.parts) do
-            Helpers.SafeDestroy(esp)
-        end
-        self._trackedEntities[entity] = nil
-        self._metrics.currentTracked = math.max(0, self._metrics.currentTracked - 1)
+    if tracking and tracking.hitbox then
+        self:RemoveESP(tracking.hitbox)
+        tracking.hasESP = false
     end
     
-    -- Também remover do cache direto
+    -- Também tentar remover de todas as partes do model
     if entity:IsA("Model") then
         for _, child in ipairs(entity:GetDescendants()) do
             if child:IsA("BasePart") then
@@ -200,156 +187,212 @@ function Hitbox:RemoveESPForEntity(entity)
         self:RemoveESP(entity)
     end
     
-    return 1
+    return true
 end
 
--- Limpar todos os ESPs
 function Hitbox:ClearAllESP()
-    -- Limpar cache de ESP
     for part, box in pairs(self._espCache) do
         Helpers.SafeDestroy(box)
     end
     self._espCache = {}
     
-    -- Limpar tracking
-    self._trackedEntities = {}
-    self._metrics.currentTracked = 0
+    -- Limpar tracking de ESP
+    for entity, tracking in pairs(self._trackedEntities) do
+        tracking.hasESP = false
+    end
 end
 
 -- ============================================================================
--- EXPANSÃO DE HITBOX (MELHORADO)
+-- EXPANDIR HITBOX (LÓGICA PRINCIPAL)
 -- ============================================================================
 
-function Hitbox:Expand(part, customSize)
-    if not part or not part:IsA("BasePart") then return false end
-    if not Helpers.IsValid(part) then return false end
-    if self._originalSizes[part] then return false end -- Já expandido
+function Hitbox:Expand(entity, customSize)
+    if not entity then return false end
+    if not Helpers.IsValid(entity) then return false end
     
-    -- Salvar tamanho original
-    self._originalSizes[part] = part.Size
+    local entityType = Helpers.GetEntityType(entity)
     
-    -- Determinar novo tamanho
-    local newSize = customSize
-    
-    if not newSize then
-        if self._config.adaptiveSize then
-            -- Tamanho adaptativo baseado no tipo de entidade
-            local entityType = Helpers.GetEntityType(part.Parent or part)
-            if entityType == Helpers.EntityTypes.PLAYER then
-                newSize = Config.HitboxSize or Vector3.new(6, 6, 6)
-            elseif entityType == Helpers.EntityTypes.ANIMAL then
-                newSize = (Config.HitboxSize or Vector3.new(6, 6, 6)) * 0.8
-            else
-                newSize = Config.HitboxSize or Vector3.new(6, 6, 6)
-            end
-        else
-            newSize = Config.HitboxSize or Vector3.new(6, 6, 6)
-        end
+    -- Normalizar tamanho
+    local size = customSize or Config.HitboxSize or Vector3.new(8, 8, 8)
+    if typeof(size) == "number" then
+        size = Vector3.new(size, size, size)
     end
     
-    -- Aplicar novo tamanho
-    local success = pcall(function()
-        part.Size = newSize
-    end)
-    
-    if not success then
-        self._originalSizes[part] = nil
+    -- ═══════════════════════════════════════════════
+    -- 👤 PLAYER → USAR FAKEHITBOX
+    -- ═══════════════════════════════════════════════
+    if entityType == Helpers.EntityTypes.PLAYER then
+        local fakeHitbox = FakeHitbox:Create(entity, size, self._config.showVisualForFake)
+        
+        if fakeHitbox then
+            self._trackedEntities[entity] = self._trackedEntities[entity] or {}
+            self._trackedEntities[entity].type = entityType
+            self._trackedEntities[entity].isExpanded = true
+            self._trackedEntities[entity].useFake = true
+            
+            self._metrics.playersWithFake = self._metrics.playersWithFake + 1
+            return true
+        end
+        
         return false
     end
     
-    -- Atualizar ESP se existir
-    if self._espCache[part] then
-        self._espCache[part].Size = newSize
+    -- ═══════════════════════════════════════════════
+    -- 🤖🐷 NPC/ANIMAL → EXPANDIR HITBOX REAL
+    -- ═══════════════════════════════════════════════
+    if entityType == Helpers.EntityTypes.NPC or entityType == Helpers.EntityTypes.ANIMAL then
+        local hitbox = Helpers.GetRealHitbox(entity)
+        if not hitbox then return false end
+        
+        -- Verificar se já está expandido
+        if self._originalSizes[hitbox] then
+            -- Apenas atualizar tamanho
+            hitbox.Size = size
+            if self._espCache[hitbox] then
+                self._espCache[hitbox].Size = size
+            end
+            return true
+        end
+        
+        -- Salvar tamanho original
+        self._originalSizes[hitbox] = hitbox.Size
+        
+        -- Aplicar novo tamanho
+        local success = pcall(function()
+            hitbox.Size = size
+            
+            -- ⚠️ PROPRIEDADES CRÍTICAS
+            hitbox.CanQuery = true
+            hitbox.CanTouch = true
+            hitbox.CanCollide = false
+        end)
+        
+        if not success then
+            self._originalSizes[hitbox] = nil
+            return false
+        end
+        
+        self._expandedParts[hitbox] = true
+        
+        -- Atualizar ESP se existir
+        if self._espCache[hitbox] then
+            self._espCache[hitbox].Size = size
+        end
+        
+        -- Registrar tracking
+        self._trackedEntities[entity] = self._trackedEntities[entity] or {}
+        self._trackedEntities[entity].type = entityType
+        self._trackedEntities[entity].isExpanded = true
+        self._trackedEntities[entity].hitbox = hitbox
+        
+        self._metrics.mobsExpanded = self._metrics.mobsExpanded + 1
+        return true
     end
     
-    self._metrics.totalExpanded = self._metrics.totalExpanded + 1
-    return true
-end
-
--- Expandir hitbox de entidade
-function Hitbox:ExpandEntity(entity, customSize)
-    if not entity then return 0 end
-    
-    local expanded = 0
-    
-    if entity:IsA("Model") then
-        local hitbox = Helpers.GetHitbox(entity)
-        if hitbox and self:Expand(hitbox, customSize) then
-            expanded = expanded + 1
-        end
-    elseif entity:IsA("BasePart") then
-        if self:Expand(entity, customSize) then
-            expanded = expanded + 1
-        end
-    end
-    
-    return expanded
+    -- ═══════════════════════════════════════════════
+    -- 📦 ITEM → NÃO EXPANDE
+    -- ═══════════════════════════════════════════════
+    return false
 end
 
 -- ============================================================================
 -- RESTAURAR HITBOX
 -- ============================================================================
 
-function Hitbox:Restore(part)
-    local originalSize = self._originalSizes[part]
+function Hitbox:Restore(entity)
+    if not entity then return false end
+    
+    local entityType = Helpers.GetEntityType(entity)
+    
+    -- ═══════════════════════════════════════════════
+    -- 👤 PLAYER → REMOVER FAKEHITBOX
+    -- ═══════════════════════════════════════════════
+    if entityType == Helpers.EntityTypes.PLAYER then
+        local removed = FakeHitbox:Remove(entity)
+        
+        if removed then
+            local tracking = self._trackedEntities[entity]
+            if tracking then
+                tracking.isExpanded = false
+                tracking.useFake = false
+            end
+            self._metrics.playersWithFake = math.max(0, self._metrics.playersWithFake - 1)
+        end
+        
+        return removed
+    end
+    
+    -- ═══════════════════════════════════════════════
+    -- 🤖🐷 NPC/ANIMAL → RESTAURAR HITBOX REAL
+    -- ═══════════════════════════════════════════════
+    local hitbox = Helpers.GetRealHitbox(entity)
+    if not hitbox then return false end
+    
+    local originalSize = self._originalSizes[hitbox]
     if not originalSize then return false end
     
-    if Helpers.IsValid(part) then
-        local success = pcall(function()
-            part.Size = originalSize
+    if Helpers.IsValid(hitbox) then
+        pcall(function()
+            hitbox.Size = originalSize
         end)
         
-        if success then
-            -- Atualizar ESP se existir
-            if self._espCache[part] then
-                self._espCache[part].Size = originalSize
-            end
+        -- Atualizar ESP se existir
+        if self._espCache[hitbox] then
+            self._espCache[hitbox].Size = originalSize
         end
     end
     
-    self._originalSizes[part] = nil
-    self._metrics.totalRestored = self._metrics.totalRestored + 1
+    self._originalSizes[hitbox] = nil
+    self._expandedParts[hitbox] = nil
+    
+    local tracking = self._trackedEntities[entity]
+    if tracking then
+        tracking.isExpanded = false
+    end
+    
+    self._metrics.mobsRestored = self._metrics.mobsRestored + 1
     return true
 end
 
--- Restaurar entidade
-function Hitbox:RestoreEntity(entity)
-    if not entity then return 0 end
-    
-    local restored = 0
-    
-    if entity:IsA("Model") then
-        for _, child in ipairs(entity:GetDescendants()) do
-            if child:IsA("BasePart") then
-                if self:Restore(child) then
-                    restored = restored + 1
-                end
-            end
-        end
-    elseif entity:IsA("BasePart") then
-        if self:Restore(entity) then
-            restored = restored + 1
-        end
-    end
-    
-    return restored
-end
-
--- Restaurar todos
 function Hitbox:RestoreAll()
     local restored = 0
     
+    -- Restaurar players (remover fake hitboxes)
+    local fakeRemoved = FakeHitbox:RemoveAll()
+    restored = restored + fakeRemoved
+    self._metrics.playersWithFake = 0
+    
+    -- Restaurar mobs/animals
     local partsToRestore = {}
     for part in pairs(self._originalSizes) do
         table.insert(partsToRestore, part)
     end
     
     for _, part in ipairs(partsToRestore) do
-        if self:Restore(part) then
+        local originalSize = self._originalSizes[part]
+        if originalSize and Helpers.IsValid(part) then
+            pcall(function()
+                part.Size = originalSize
+            end)
+            
+            if self._espCache[part] then
+                self._espCache[part].Size = originalSize
+            end
+            
             restored = restored + 1
         end
+        
+        self._originalSizes[part] = nil
+        self._expandedParts[part] = nil
     end
     
+    -- Limpar tracking de expansão
+    for entity, tracking in pairs(self._trackedEntities) do
+        tracking.isExpanded = false
+        tracking.useFake = false
+    end
+    
+    self._metrics.mobsRestored = self._metrics.mobsRestored + restored
     return restored
 end
 
@@ -364,8 +407,16 @@ function Hitbox:UpdateSize(newSize)
     
     Config.HitboxSize = newSize
     
-    -- Atualizar todas as hitboxes expandidas
-    for part in pairs(self._originalSizes) do
+    -- Atualizar FakeHitbox config
+    FakeHitbox:Configure({ defaultSize = newSize })
+    
+    -- Atualizar fake hitboxes existentes
+    for char in pairs(FakeHitbox._active or {}) do
+        FakeHitbox:UpdateSize(char, newSize)
+    end
+    
+    -- Atualizar hitboxes de mobs expandidos
+    for part in pairs(self._expandedParts) do
         if Helpers.IsValid(part) then
             pcall(function()
                 part.Size = newSize
@@ -379,35 +430,7 @@ function Hitbox:UpdateSize(newSize)
 end
 
 -- ============================================================================
--- ATUALIZAR COR
--- ============================================================================
-
-function Hitbox:UpdateColor(part, color)
-    local box = self._espCache[part]
-    if box then
-        box.Color3 = color
-        return true
-    end
-    return false
-end
-
-function Hitbox:UpdateColorByType(entityType, color)
-    self._colors[entityType] = color
-    
-    -- Atualizar ESPs existentes do mesmo tipo
-    for entity, tracking in pairs(self._trackedEntities) do
-        if tracking.type == entityType then
-            for _, esp in ipairs(tracking.parts) do
-                if esp and esp.Parent then
-                    esp.Color3 = color
-                end
-            end
-        end
-    end
-end
-
--- ============================================================================
--- UPDATE LOOP (AUTO-TRACKING)
+-- UPDATE LOOP
 -- ============================================================================
 
 function Hitbox:StartUpdateLoop()
@@ -423,41 +446,54 @@ function Hitbox:StartUpdateLoop()
         -- ═══════════════════════════════════════════════
         -- AUTO-TRACK PLAYERS
         -- ═══════════════════════════════════════════════
-        if self._config.autoTrackPlayers and Config.ShowHitboxESP then
+        if self._config.autoTrackPlayers then
             for _, otherPlayer in ipairs(Players:GetPlayers()) do
                 if otherPlayer ~= player and otherPlayer.Character then
-                    local hitbox = Helpers.GetHitbox(otherPlayer.Character)
-                    if hitbox and not self._espCache[hitbox] then
-                        self:CreateESP(hitbox, self._colors.Player, "Player")
+                    local char = otherPlayer.Character
+                    
+                    -- ESP
+                    if Config.ShowHitboxESP then
+                        local hitbox = Helpers.GetVisualHitbox(char)
+                        if hitbox and not self._espCache[hitbox] then
+                            self:CreateESP(hitbox, self._colors[Helpers.EntityTypes.PLAYER], Helpers.EntityTypes.PLAYER)
+                        end
                     end
                     
-                    -- Expandir se configurado
-                    if Config.ExpandHitbox and hitbox then
-                        self:Expand(hitbox)
+                    -- Expandir (usa FakeHitbox)
+                    if Config.ExpandHitbox then
+                        if not FakeHitbox:Has(char) then
+                            self:Expand(char)
+                        end
                     end
                 end
             end
         end
         
         -- ═══════════════════════════════════════════════
-        -- AUTO-TRACK MOBS (via Entities folder)
+        -- AUTO-TRACK MOBS
         -- ═══════════════════════════════════════════════
-        if self._config.autoTrackMobs and Config.ShowHitboxESP then
+        if self._config.autoTrackMobs then
             local entitiesFolder = workspace:FindFirstChild("Entities")
             if entitiesFolder then
                 for _, entity in ipairs(entitiesFolder:GetChildren()) do
                     if entity:IsA("Model") then
                         local entityType = Helpers.GetEntityType(entity)
                         
-                        if entityType == Helpers.EntityTypes.ANIMAL or entityType == Helpers.EntityTypes.MOB then
-                            local hitbox = Helpers.GetHitbox(entity)
-                            if hitbox and not self._espCache[hitbox] then
-                                self:CreateESP(hitbox, self._colors[entityType], entityType)
+                        if entityType == Helpers.EntityTypes.NPC or entityType == Helpers.EntityTypes.ANIMAL then
+                            -- ESP
+                            if Config.ShowHitboxESP then
+                                local hitbox = Helpers.GetVisualHitbox(entity)
+                                if hitbox and not self._espCache[hitbox] then
+                                    self:CreateESP(hitbox, self._colors[entityType], entityType)
+                                end
                             end
                             
-                            -- Expandir se configurado
-                            if Config.ExpandHitbox and hitbox then
-                                self:Expand(hitbox)
+                            -- Expandir
+                            if Config.ExpandHitbox then
+                                local hitbox = Helpers.GetRealHitbox(entity)
+                                if hitbox and not self._expandedParts[hitbox] then
+                                    self:Expand(entity)
+                                end
                             end
                         end
                     end
@@ -466,31 +502,31 @@ function Hitbox:StartUpdateLoop()
         end
         
         -- ═══════════════════════════════════════════════
-        -- CLEANUP DE ESPS MORTOS
+        -- CLEANUP
         -- ═══════════════════════════════════════════════
-        local toRemove = {}
-        for part, box in pairs(self._espCache) do
-            if not Helpers.IsValid(part) or not Helpers.IsValid(box) then
-                table.insert(toRemove, part)
+        local toRemoveESP = {}
+        for part in pairs(self._espCache) do
+            if not Helpers.IsValid(part) then
+                table.insert(toRemoveESP, part)
             end
         end
         
-        for _, part in ipairs(toRemove) do
+        for _, part in ipairs(toRemoveESP) do
             self._espCache[part] = nil
             self._originalSizes[part] = nil
+            self._expandedParts[part] = nil
         end
         
         -- Cleanup tracking
-        local trackingToRemove = {}
+        local toRemoveTracking = {}
         for entity in pairs(self._trackedEntities) do
             if not Helpers.IsValid(entity) then
-                table.insert(trackingToRemove, entity)
+                table.insert(toRemoveTracking, entity)
             end
         end
         
-        for _, entity in ipairs(trackingToRemove) do
+        for _, entity in ipairs(toRemoveTracking) do
             self._trackedEntities[entity] = nil
-            self._metrics.currentTracked = math.max(0, self._metrics.currentTracked - 1)
         end
         
         self._metrics.lastUpdateTime = tick() - startTime
@@ -523,6 +559,34 @@ function Hitbox:ToggleExpand(state)
     end
 end
 
+function Hitbox:ToggleFakeVisual(state)
+    self._config.showVisualForFake = state
+    FakeHitbox:ToggleVisuals(state)
+end
+
+-- ============================================================================
+-- ATUALIZAR CORES
+-- ============================================================================
+
+function Hitbox:UpdateColor(entityType, color)
+    self._colors[entityType] = color
+    
+    -- Atualizar ESPs existentes
+    for entity, tracking in pairs(self._trackedEntities) do
+        if tracking.type == entityType and tracking.hitbox then
+            local esp = self._espCache[tracking.hitbox]
+            if esp and esp.Parent then
+                esp.Color3 = color
+            end
+        end
+    end
+    
+    -- Atualizar cor do FakeHitbox para players
+    if entityType == Helpers.EntityTypes.PLAYER then
+        FakeHitbox:Configure({ visualColor = color })
+    end
+end
+
 -- ============================================================================
 -- GETTERS E MÉTRICAS
 -- ============================================================================
@@ -536,11 +600,11 @@ function Hitbox:GetESPCount()
 end
 
 function Hitbox:GetExpandedCount()
-    local count = 0
-    for _ in pairs(self._originalSizes) do
-        count = count + 1
+    local mobCount = 0
+    for _ in pairs(self._expandedParts) do
+        mobCount = mobCount + 1
     end
-    return count
+    return mobCount + FakeHitbox:GetCount()
 end
 
 function Hitbox:GetTrackedCount()
@@ -551,8 +615,15 @@ function Hitbox:GetTrackedCount()
     return count
 end
 
-function Hitbox:IsExpanded(part)
-    return self._originalSizes[part] ~= nil
+function Hitbox:IsExpanded(entity)
+    local entityType = Helpers.GetEntityType(entity)
+    
+    if entityType == Helpers.EntityTypes.PLAYER then
+        return FakeHitbox:Has(entity)
+    end
+    
+    local hitbox = Helpers.GetRealHitbox(entity)
+    return hitbox and self._expandedParts[hitbox] == true
 end
 
 function Hitbox:HasESP(part)
@@ -560,14 +631,28 @@ function Hitbox:HasESP(part)
 end
 
 function Hitbox:GetMetrics()
+    local fakeMetrics = FakeHitbox:GetMetrics()
+    
     return {
+        -- ESP
         espCount = self:GetESPCount(),
+        espCreated = self._metrics.espCreated,
+        espRemoved = self._metrics.espRemoved,
+        
+        -- Expansão
         expandedCount = self:GetExpandedCount(),
+        mobsExpanded = self._metrics.mobsExpanded,
+        mobsRestored = self._metrics.mobsRestored,
+        
+        -- FakeHitbox
+        playersWithFake = fakeMetrics.currentActive,
+        fakeCreated = fakeMetrics.totalCreated,
+        fakeRemoved = fakeMetrics.totalRemoved,
+        
+        -- Tracking
         trackedCount = self:GetTrackedCount(),
-        totalCreated = self._metrics.totalCreated,
-        totalRemoved = self._metrics.totalRemoved,
-        totalExpanded = self._metrics.totalExpanded,
-        totalRestored = self._metrics.totalRestored,
+        
+        -- Performance
         lastUpdateTime = string.format("%.4fms", self._metrics.lastUpdateTime * 1000),
         updateLoopRunning = self._updateLoopRunning,
     }
@@ -586,8 +671,8 @@ function Hitbox:Configure(options)
         self._config.autoTrackMobs = options.autoTrackMobs
     end
     
-    if options.adaptiveSize ~= nil then
-        self._config.adaptiveSize = options.adaptiveSize
+    if options.showVisualForFake ~= nil then
+        self:ToggleFakeVisual(options.showVisualForFake)
     end
     
     if options.colors then
@@ -601,7 +686,7 @@ function Hitbox:GetConfig()
     return {
         autoTrackPlayers = self._config.autoTrackPlayers,
         autoTrackMobs = self._config.autoTrackMobs,
-        adaptiveSize = self._config.adaptiveSize,
+        showVisualForFake = self._config.showVisualForFake,
         colors = self._colors,
     }
 end
@@ -612,5 +697,6 @@ end
 
 _G.MineHub = _G.MineHub or {}
 _G.MineHub.Hitbox = Hitbox
+_G.MineHub.FakeHitbox = FakeHitbox
 
 return Hitbox
