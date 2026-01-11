@@ -106,6 +106,20 @@ function MobESP:Remove(model)
     self._cache[model] = nil
 end
 
+-- Callback para quando receber dados de entity
+function MobESP:OnEntityData(model, entData)
+    if not model then return end
+    if not Config.MobESP then return end
+    
+    -- Verificar se é mob (não é item, não é player)
+    local entityType = Helpers.GetEntityType(model)
+    
+    if entityType == Helpers.EntityTypes.ANIMAL or 
+       entityType == Helpers.EntityTypes.NPC then
+        self:Update(model, entData.Health, entData.MaxHealth or 20, entData.id)
+    end
+end
+
 function MobESP:Update(model, health, maxHealth, name)
     if not self._cache[model] then
         self:Create(model, name)

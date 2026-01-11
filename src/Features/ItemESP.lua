@@ -809,6 +809,10 @@ function ItemESP:GetTrackedItems()
     return items
 end
 
+function ItemESP:IsInitialized()
+    return self._initialized
+end
+
 -- ============================================================================
 -- EXPORT GLOBAL
 -- ============================================================================

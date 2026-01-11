@@ -490,6 +490,37 @@ function Cache:GetHitbox(obj)
     return hitbox
 end
 
+-- ============================================================================
+-- ENTITY DATA CACHE
+-- ============================================================================
+
+Cache.EntityData = {}
+
+function Cache:SetEntityData(model, data)
+    if not model then return end
+    
+    self.EntityData[model] = {
+        data = data,
+        lastUpdate = tick()
+    }
+end
+
+function Cache:GetEntityData(model)
+    local cached = self.EntityData[model]
+    if cached then
+        return cached.data, cached.lastUpdate
+    end
+    return nil, 0
+end
+
+function Cache:ClearEntityData(model)
+    if model then
+        self.EntityData[model] = nil
+    else
+        self.EntityData = {}
+    end
+end
+
 -- Cache de Entity Type
 function Cache:GetEntityType(obj)
     if not obj then return "Unknown" end
