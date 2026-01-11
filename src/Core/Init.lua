@@ -58,29 +58,6 @@ local Cache = require("Engine/Cache")
 local ConnectionManager = require("Engine/ConnectionManager")
 local ObjectPool, _ = safeRequire("Engine/ObjectPool")
 
--- FakeHitbox é OPCIONAL - sistema funciona sem ele
-local FakeHitbox, fakeHitboxErr = safeRequire("Engine/FakeHitbox")
-if not FakeHitbox then
-    -- Criar stub vazio para não quebrar o código
-    FakeHitbox = {
-        Create = function() return nil end,
-        Remove = function() return false end,
-        RemoveAll = function() return 0 end,
-        Has = function() return false end,
-        Get = function() return nil end,
-        UpdateSize = function() return nil end,
-        StartAutoCleanup = function() end,
-        StopAutoCleanup = function() end,
-        ToggleVisuals = function() end,
-        Configure = function() end,
-        GetConfig = function() return {} end,
-        GetMetrics = function() return { totalCreated = 0, totalRemoved = 0, currentActive = 0 } end,
-        GetCount = function() return 0 end,
-        _active = {},
-    }
-    log("FakeHitbox não disponível, usando stub")
-end
-
 -- ============================================================================
 -- CARREGAR UTILS
 -- ============================================================================
@@ -451,7 +428,6 @@ local function setupConfigWatchers()
             if ItemESP.Disable then ItemESP:Disable() end
             if Hitbox.ClearAllESP then Hitbox:ClearAllESP() end
             if Hitbox.RestoreAll then Hitbox:RestoreAll() end
-            if FakeHitbox.RemoveAll then FakeHitbox:RemoveAll() end
             if AdminDetection.ClearAllESP then AdminDetection:ClearAllESP() end
             
             if Config.AlwaysDay and AlwaysDay.Toggle then
@@ -473,12 +449,6 @@ end
 -- ============================================================================
 
 local function initializeFeatures()
-    -- FakeHitbox
-    safeInit("FakeHitbox", function()
-        if FakeHitbox.StartAutoCleanup then
-            FakeHitbox:StartAutoCleanup()
-        end
-    end)
     
     -- Hitbox
     safeInit("Hitbox", function()
@@ -572,22 +542,11 @@ _G.MineHub.Debug = {
     GetCacheMetrics = function() return Cache.GetMetrics and Cache:GetMetrics() or {} end,
     GetItemESPMetrics = function() return ItemESP.GetMetrics and ItemESP:GetMetrics() or {} end,
     GetHitboxMetrics = function() return Hitbox.GetMetrics and Hitbox:GetMetrics() or {} end,
-    GetFakeHitboxMetrics = function() return FakeHitbox.GetMetrics and FakeHitbox:GetMetrics() or {} end,
     GetEntityIndexCount = function() return EntityIndex:GetCount() end,
     RefreshItemESP = function() if ItemESP.Refresh then ItemESP:Refresh() end end,
     RefreshEntityIndex = function() EntityIndex:Rebuild() end,
     SetDebugMode = function(enabled) DEBUG_MODE = enabled end,
 }
-
--- ============================================================================
--- CLEANUP
--- ============================================================================
-
-game:BindToClose(function()
-    ConnectionManager:RemoveAll()
-    if FakeHitbox.RemoveAll then FakeHitbox:RemoveAll() end
-    if Hitbox.RestoreAll then Hitbox:RestoreAll() end
-end)
 
 -- ============================================================================
 -- RETURN
@@ -598,7 +557,6 @@ return {
     Constants = Constants,
     Cache = Cache,
     ConnectionManager = ConnectionManager,
-    FakeHitbox = FakeHitbox,
     EntityIndex = EntityIndex,
     MineralESP = MineralESP,
     PlayerESP = PlayerESP,

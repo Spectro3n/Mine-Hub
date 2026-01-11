@@ -181,7 +181,7 @@ function RayfieldUI:CreateWorldTab()
 
     WorldTab:CreateSection("🌤️ Ambiente")
 
-    WorldTab:CreateToggle({
+        WorldTab:CreateToggle({
         Name = "🌞 Sempre Dia",
         CurrentValue = Config.AlwaysDay,
         Callback = function(Value)
@@ -190,6 +190,27 @@ function RayfieldUI:CreateWorldTab()
             else
                 Notifications:Send("🛑 Safe Mode", "Desative o Safe Mode primeiro!", 2)
             end
+        end,
+    })
+    
+    -- Opcional: Slider para ajustar horário
+    WorldTab:CreateSlider({
+        Name = "⏰ Horário do Dia",
+        Range = {0, 24},
+        Increment = 1,
+        Suffix = "h",
+        CurrentValue = 12,
+        Callback = function(Value)
+            AlwaysDay:SetTime(Value)
+        end,
+    })
+    
+    -- Opcional: Toggle para propriedades extras
+    WorldTab:CreateToggle({
+        Name = "💡 Travar Brilho/Ambient",
+        CurrentValue = true,
+        Callback = function(Value)
+            AlwaysDay:Configure({ lockExtraProperties = Value })
         end,
     })
 
