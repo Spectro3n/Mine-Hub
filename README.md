@@ -33,6 +33,7 @@ Mine-Hub/
     │   ├── AdminDetection.lua          ✅ CRIADO
     │   ├── WaterWalk.lua               ✅ CRIADO
     │   ├── AlwaysDay.lua               ✅ CRIADO
+    │   ├── FakeHitbox.lua              ✅ CRIADO
     │   └── Hitbox.lua                  ✅ CRIADO
     │
     ├── UI/
@@ -44,7 +45,7 @@ Mine-Hub/
         └── Detection.lua               ✅ CRIADO
 ```
 
-**Total: 16 arquivos modulares e organizados!** 🎯
+**Total: 17 arquivos modulares e organizados!** 🎯
 
 ---
 
@@ -413,7 +414,7 @@ Este projeto demonstra:
 
 Obrigado por usar o Mine-Hub! Se tiver dúvidas ou sugestões, abra uma Issue no GitHub! 🚀
 
-**Made with ❤️ by Claude & You**
+**Made with ❤️ by Spectro3n**
 
 ---
 
