@@ -4,7 +4,7 @@
 
 local Constants = {}
 
-Constants.VERSION = "5.0"
+Constants.VERSION = "5.5"
 Constants.BUILD = "modular"
 
 Constants.TOGGLE_KEY = Enum.KeyCode.R

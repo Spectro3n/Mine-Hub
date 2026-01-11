@@ -1,5 +1,5 @@
 -- ============================================================================
--- ITEM ESP - Detecta itens na pasta Entities
+-- ITEM ESP v2.0 - Otimizado com loop único e heurística por níveis
 -- ============================================================================
 
 local RunService = game:GetService("RunService")
@@ -12,47 +12,127 @@ local ConnectionManager = require("Engine/ConnectionManager")
 local Helpers = require("Utils/Helpers")
 
 local ItemESP = {
-    _cache = {},           -- obj -> {billboard, highlight, updateId}
+    -- Cache principal: obj -> ESPData
+    _cache = {},
+    
+    -- Referências importantes
     _entitiesFolder = nil,
+    _espFolder = nil,           -- Folder dedicado para ESPs no PlayerGui
+    _highlightFolder = nil,     -- Folder dedicado para Highlights no workspace
+    
+    -- Estado
     _initialized = false,
+    _updateLoopRunning = false,
+    
+    -- Métricas
+    _metrics = {
+        totalCreated = 0,
+        totalRemoved = 0,
+        itemsIgnored = 0,
+        lastUpdateTime = 0,
+        averageUpdateTime = 0,
+        updateCount = 0,
+    },
 }
 
 local player = Players.LocalPlayer
 
 -- ============================================================================
--- DETECÇÃO DE ITEM (MELHORADA)
+-- CONSTANTES DE CONFIANÇA
 -- ============================================================================
 
-local function isItem(obj)
-    if not obj then return false end
-    
-    -- Pode ser BasePart ou Model
-    if not obj:IsA("BasePart") and not obj:IsA("Model") then
-        return false
-    end
+local CONFIDENCE = {
+    HIGH = 3,    -- Certeza que é item
+    MEDIUM = 2,  -- Provavelmente item
+    LOW = 1,     -- Talvez seja item
+    NONE = 0,    -- Não é item
+}
+
+-- ============================================================================
+-- HEURÍSTICA DE DETECÇÃO POR NÍVEIS
+-- ============================================================================
+
+local function getItemConfidence(obj)
+    if not obj then return CONFIDENCE.NONE end
     
     local name = obj.Name
+    local nameLower = string.lower(name)
     
-    -- Nome numérico = item dropado
+    -- ═══════════════════════════════════════════════
+    -- 🟢 ALTA CONFIANÇA (sempre é item)
+    -- ═══════════════════════════════════════════════
+    
+    -- Nome numérico + está em Entities = certeza absoluta
     if tonumber(name) then
-        return true
+        return CONFIDENCE.HIGH
     end
     
-    -- Contém "part" no nome (case insensitive)
-    if string.find(string.lower(name), "part") then
-        return true
+    -- ═══════════════════════════════════════════════
+    -- 🟡 MÉDIA CONFIANÇA (provavelmente item)
+    -- ═══════════════════════════════════════════════
+    
+    -- Contém "item", "drop", "loot"
+    if string.find(nameLower, "item") or 
+       string.find(nameLower, "drop") or 
+       string.find(nameLower, "loot") then
+        return CONFIDENCE.MEDIUM
     end
     
-    -- Verifica se é um item baseado em propriedades
+    -- Model sem Humanoid
     if obj:IsA("Model") then
-        -- Models com nome numérico ou sem humanoid são itens
         local hasHumanoid = obj:FindFirstChildOfClass("Humanoid")
-        if not hasHumanoid and tonumber(name) then
-            return true
+        if not hasHumanoid then
+            -- Verificar se é pequeno (itens geralmente são pequenos)
+            local primaryPart = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+            if primaryPart then
+                local size = primaryPart.Size.Magnitude
+                if size < 10 then -- Pequeno = provavelmente item
+                    return CONFIDENCE.MEDIUM
+                end
+            end
         end
     end
     
-    return false
+    -- BasePart contendo "part" no nome
+    if obj:IsA("BasePart") and string.find(nameLower, "part") then
+        return CONFIDENCE.MEDIUM
+    end
+    
+    -- ═══════════════════════════════════════════════
+    -- 🔴 BAIXA CONFIANÇA (talvez seja item)
+    -- ═══════════════════════════════════════════════
+    
+    -- Model grande ou com muitas partes
+    if obj:IsA("Model") then
+        local partCount = 0
+        for _, child in ipairs(obj:GetDescendants()) do
+            if child:IsA("BasePart") then
+                partCount = partCount + 1
+            end
+        end
+        
+        -- Muitas partes = provavelmente estrutura, não item
+        if partCount > 20 then
+            return CONFIDENCE.NONE
+        elseif partCount > 5 then
+            return CONFIDENCE.LOW
+        end
+    end
+    
+    -- BasePart solta
+    if obj:IsA("BasePart") then
+        return CONFIDENCE.LOW
+    end
+    
+    return CONFIDENCE.NONE
+end
+
+local function isItem(obj)
+    return getItemConfidence(obj) >= CONFIDENCE.MEDIUM
+end
+
+local function isDefinitelyItem(obj)
+    return getItemConfidence(obj) >= CONFIDENCE.HIGH
 end
 
 -- ============================================================================
@@ -60,38 +140,90 @@ end
 -- ============================================================================
 
 local function getAdorneePart(obj)
+    if not obj or not obj.Parent then return nil end
+    
     if obj:IsA("BasePart") then
         return obj
     elseif obj:IsA("Model") then
-        if obj.PrimaryPart then
-            return obj.PrimaryPart
-        end
-        return obj:FindFirstChildWhichIsA("BasePart")
+        return obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
     end
     return nil
 end
 
 -- ============================================================================
--- OBTER NOME DO ITEM
+-- OBTER NOME DO ITEM (CACHED - SÓ CALCULA UMA VEZ)
 -- ============================================================================
 
 local function getItemDisplayName(obj)
     local name = obj.Name
     
-    -- Se for numérico, tenta encontrar um nome melhor
     if tonumber(name) then
-        -- Procura por uma parte com nome descritivo dentro
+        -- Procurar nome descritivo dentro do model
         if obj:IsA("Model") then
             for _, child in ipairs(obj:GetChildren()) do
                 if child:IsA("BasePart") and not tonumber(child.Name) then
-                    return child.Name
+                    local childName = child.Name
+                    if childName ~= "Part" and childName ~= "Handle" then
+                        return childName
+                    end
                 end
             end
         end
         return "Item #" .. name
     end
     
+    -- Limpar nome
+    name = string.gsub(name, "Part", "")
+    name = string.gsub(name, "Model", "")
+    name = string.gsub(name, "_", " ")
+    
+    if #name == 0 then
+        return "Item"
+    end
+    
     return name
+end
+
+-- ============================================================================
+-- SETUP DOS FOLDERS DEDICADOS
+-- ============================================================================
+
+function ItemESP:SetupFolders()
+    -- Folder para Billboards no PlayerGui
+    local playerGui = player:WaitForChild("PlayerGui")
+    
+    self._espFolder = playerGui:FindFirstChild("_ItemESP")
+    if not self._espFolder then
+        self._espFolder = Instance.new("Folder")
+        self._espFolder.Name = "_ItemESP"
+        self._espFolder.Parent = playerGui
+    end
+    
+    -- Folder para Highlights no workspace
+    self._highlightFolder = workspace:FindFirstChild("_ESPHighlights")
+    if not self._highlightFolder then
+        self._highlightFolder = Instance.new("Folder")
+        self._highlightFolder.Name = "_ESPHighlights"
+        self._highlightFolder.Parent = workspace
+    end
+end
+
+-- ============================================================================
+-- LIDAR COM RESPAWN DO PLAYER
+-- ============================================================================
+
+function ItemESP:SetupRespawnHandler()
+    ConnectionManager:Add("itemESP_respawn", player.CharacterAdded:Connect(function()
+        task.wait(0.5)
+        -- Recriar folder de ESP
+        self:SetupFolders()
+        -- Reparentar todos os billboards existentes
+        for obj, data in pairs(self._cache) do
+            if data.billboard and data.billboard.Parent then
+                data.billboard.Parent = self._espFolder
+            end
+        end
+    end), "itemESP")
 end
 
 -- ============================================================================
@@ -100,36 +232,46 @@ end
 
 function ItemESP:Create(obj)
     if not Config.ItemESP then return end
-    if not isItem(obj) then return end
     if self._cache[obj] then return end
+    
+    local confidence = getItemConfidence(obj)
+    if confidence < CONFIDENCE.MEDIUM then
+        self._metrics.itemsIgnored = self._metrics.itemsIgnored + 1
+        return
+    end
     
     local part = getAdorneePart(obj)
     if not part then return end
     
+    -- Nome é calculado UMA VEZ e cacheado
     local displayName = getItemDisplayName(obj)
     
-    -- Highlight
+    -- ═══════════════════════════════════════════════
+    -- HIGHLIGHT (no folder dedicado)
+    -- ═══════════════════════════════════════════════
     local targetForHighlight = obj:IsA("Model") and obj or obj
+    
     local hl = Instance.new("Highlight")
-    hl.Name = "ItemESP"
+    hl.Name = "ItemHL_" .. tostring(obj:GetDebugId())
     hl.FillColor = Constants.COLORS.ITEM
     hl.OutlineColor = Constants.COLORS.ITEM_OUTLINE
-    hl.FillTransparency = 0.6
+    hl.FillTransparency = confidence == CONFIDENCE.HIGH and 0.5 or 0.7
     hl.OutlineTransparency = 0
     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     hl.Adornee = targetForHighlight
-    hl.Parent = targetForHighlight
+    hl.Parent = self._highlightFolder
     
-    -- Billboard (no PlayerGui para não ser afetado por hierarquia)
+    -- ═══════════════════════════════════════════════
+    -- BILLBOARD (no folder dedicado do PlayerGui)
+    -- ═══════════════════════════════════════════════
     local bb = Instance.new("BillboardGui")
-    bb.Name = "ItemESP_" .. tostring(obj:GetDebugId())
+    bb.Name = "ItemBB_" .. tostring(obj:GetDebugId())
     bb.Adornee = part
-    bb.Size = UDim2.fromOffset(150, 50)
+    bb.Size = UDim2.fromOffset(140, 45)
     bb.StudsOffset = Vector3.new(0, 2.5, 0)
     bb.AlwaysOnTop = true
-    bb.Parent = player:WaitForChild("PlayerGui")
+    bb.Parent = self._espFolder
     
-    -- Frame com estilo
     local frame = Instance.new("Frame")
     frame.Size = UDim2.fromScale(1, 1)
     frame.BackgroundColor3 = Color3.fromRGB(30, 30, 0)
@@ -146,7 +288,6 @@ function ItemESP:Create(obj)
     stroke.Thickness = 2
     stroke.Parent = frame
     
-    -- Label
     local label = Instance.new("TextLabel")
     label.Size = UDim2.fromScale(1, 1)
     label.BackgroundTransparency = 1
@@ -154,44 +295,24 @@ function ItemESP:Create(obj)
     label.TextColor3 = Constants.COLORS.ITEM
     label.TextStrokeTransparency = 0.3
     label.TextStrokeColor3 = Color3.new(0, 0, 0)
-    label.TextSize = 14
+    label.TextSize = 13
     label.Font = Enum.Font.GothamBold
-    label.TextScaled = false
     label.Parent = frame
     
-    -- Update loop
-    local updateId = "itemESP_" .. tostring(obj:GetDebugId())
-    ConnectionManager:Add(updateId, RunService.Heartbeat:Connect(function()
-        -- Verificar se objeto ainda existe
-        if not obj or not obj.Parent then
-            self:Remove(obj)
-            return
-        end
-        
-        -- Verificar se parte ainda existe
-        local currentPart = getAdorneePart(obj)
-        if not currentPart then
-            self:Remove(obj)
-            return
-        end
-        
-        -- Atualizar adornee se mudou
-        if bb.Adornee ~= currentPart then
-            bb.Adornee = currentPart
-        end
-        
-        -- Atualizar distância
-        local dist = Cache:GetDistanceFromCamera(currentPart.Position)
-        label.Text = string.format("📦 %s\n%.0fm", displayName, dist)
-    end), "itemESP")
-    
-    -- Armazenar referências
+    -- ═══════════════════════════════════════════════
+    -- ARMAZENAR NO CACHE
+    -- ═══════════════════════════════════════════════
     self._cache[obj] = {
         billboard = bb,
         highlight = hl,
-        updateId = updateId,
-        displayName = displayName
+        label = label,
+        displayName = displayName,  -- CACHEADO, nunca recalcula
+        confidence = confidence,
+        part = part,
+        createdAt = tick(),
     }
+    
+    self._metrics.totalCreated = self._metrics.totalCreated + 1
 end
 
 -- ============================================================================
@@ -202,32 +323,96 @@ function ItemESP:Remove(obj)
     local data = self._cache[obj]
     if not data then return end
     
-    -- Remover conexão primeiro
-    if data.updateId then
-        ConnectionManager:Remove(data.updateId)
-    end
-    
-    -- Destruir objetos
+    -- Destruir objetos de forma segura
     Helpers.SafeDestroy(data.billboard)
     Helpers.SafeDestroy(data.highlight)
     
     self._cache[obj] = nil
+    self._metrics.totalRemoved = self._metrics.totalRemoved + 1
 end
 
 -- ============================================================================
--- PROCESSAR OBJETO (VERIFICA SE É ITEM OU MODEL COM ITENS)
+-- LOOP DE UPDATE ÚNICO (UM HEARTBEAT PARA TODOS)
+-- ============================================================================
+
+function ItemESP:StartUpdateLoop()
+    if self._updateLoopRunning then return end
+    self._updateLoopRunning = true
+    
+    ConnectionManager:Add("itemESP_updateLoop", RunService.Heartbeat:Connect(function()
+        if not Config.ItemESP then return end
+        
+        local startTime = tick()
+        local itemsUpdated = 0
+        
+        -- Iterar sobre todos os itens de uma vez
+        for obj, data in pairs(self._cache) do
+            -- ═══════════════════════════════════════════════
+            -- VALIDAÇÃO DE EXISTÊNCIA
+            -- ═══════════════════════════════════════════════
+            if not obj or not obj.Parent then
+                self:Remove(obj)
+                continue
+            end
+            
+            -- ═══════════════════════════════════════════════
+            -- ATUALIZAR ADORNEE SE NECESSÁRIO
+            -- ═══════════════════════════════════════════════
+            local currentPart = getAdorneePart(obj)
+            if not currentPart then
+                self:Remove(obj)
+                continue
+            end
+            
+            if data.part ~= currentPart then
+                data.part = currentPart
+                if data.billboard then
+                    data.billboard.Adornee = currentPart
+                end
+            end
+            
+            -- ═══════════════════════════════════════════════
+            -- ATUALIZAR DISTÂNCIA (USA CACHE GLOBAL)
+            -- ═══════════════════════════════════════════════
+            local dist = Cache:GetDistanceFromCamera(currentPart.Position)
+            
+            -- Só atualiza texto se o billboard existe
+            if data.label then
+                data.label.Text = string.format("📦 %s\n%.0fm", data.displayName, dist)
+            end
+            
+            itemsUpdated = itemsUpdated + 1
+        end
+        
+        -- Métricas
+        local updateTime = tick() - startTime
+        self._metrics.lastUpdateTime = updateTime
+        self._metrics.updateCount = self._metrics.updateCount + 1
+        
+        -- Média móvel
+        self._metrics.averageUpdateTime = (self._metrics.averageUpdateTime * 0.9) + (updateTime * 0.1)
+        
+    end), "itemESP")
+end
+
+function ItemESP:StopUpdateLoop()
+    ConnectionManager:Remove("itemESP_updateLoop")
+    self._updateLoopRunning = false
+end
+
+-- ============================================================================
+-- PROCESSAR OBJETO
 -- ============================================================================
 
 function ItemESP:ProcessObject(obj)
     if not Config.ItemESP then return end
     
-    -- Tentar criar ESP para o objeto
     self:Create(obj)
     
     -- Se for Model, verificar filhos também
     if obj:IsA("Model") then
         for _, child in ipairs(obj:GetChildren()) do
-            if isItem(child) then
+            if child:IsA("BasePart") and isItem(child) then
                 self:Create(child)
             end
         end
@@ -235,65 +420,44 @@ function ItemESP:ProcessObject(obj)
 end
 
 -- ============================================================================
--- SCAN INICIAL DA PASTA ENTITIES
+-- SCAN INICIAL
 -- ============================================================================
 
 function ItemESP:ScanEntities()
     if not self._entitiesFolder then return end
     
+    local count = 0
     for _, obj in ipairs(self._entitiesFolder:GetChildren()) do
-        task.spawn(function()
-            self:ProcessObject(obj)
-        end)
+        self:ProcessObject(obj)
+        count = count + 1
+        
+        -- Yield a cada 50 objetos para não travar
+        if count % 50 == 0 then
+            task.wait()
+        end
     end
 end
 
 -- ============================================================================
--- INICIALIZAR MONITORAMENTO
+-- SETUP CONEXÕES DA PASTA ENTITIES
 -- ============================================================================
 
-function ItemESP:Init()
-    if self._initialized then return end
-    
-    -- Buscar pasta Entities
-    self._entitiesFolder = workspace:FindFirstChild("Entities")
-    
-    if not self._entitiesFolder then
-        -- Esperar pela pasta
-        task.spawn(function()
-            self._entitiesFolder = workspace:WaitForChild("Entities", 30)
-            if self._entitiesFolder then
-                self:SetupConnections()
-                self:ScanEntities()
-            end
-        end)
-    else
-        self:SetupConnections()
-        self:ScanEntities()
-    end
-    
-    self._initialized = true
-end
-
--- ============================================================================
--- CONFIGURAR CONEXÕES
--- ============================================================================
-
-function ItemESP:SetupConnections()
+function ItemESP:SetupEntityConnections()
     if not self._entitiesFolder then return end
     
-    -- Novo objeto adicionado
+    -- Novo objeto
     ConnectionManager:Add("itemESP_childAdded", self._entitiesFolder.ChildAdded:Connect(function(obj)
         if not Config.ItemESP then return end
-        task.wait(0.1) -- Pequeno delay para garantir que o objeto está completo
-        self:ProcessObject(obj)
+        task.defer(function()
+            self:ProcessObject(obj)
+        end)
     end), "itemESP")
     
     -- Objeto removido
     ConnectionManager:Add("itemESP_childRemoved", self._entitiesFolder.ChildRemoved:Connect(function(obj)
         self:Remove(obj)
         
-        -- Remover filhos também se era um Model
+        -- Remover filhos se era Model
         if obj:IsA("Model") then
             for _, child in ipairs(obj:GetChildren()) do
                 self:Remove(child)
@@ -301,54 +465,78 @@ function ItemESP:SetupConnections()
         end
     end), "itemESP")
     
-    -- Descendant adicionado (para itens dentro de models)
-    ConnectionManager:Add("itemESP_descendantAdded", self._entitiesFolder.DescendantAdded:Connect(function(obj)
+    -- Descendant adicionado
+    ConnectionManager:Add("itemESP_descAdded", self._entitiesFolder.DescendantAdded:Connect(function(obj)
         if not Config.ItemESP then return end
-        task.defer(function()
-            if isItem(obj) then
+        if obj:IsA("BasePart") and isItem(obj) then
+            task.defer(function()
                 self:Create(obj)
-            end
-        end)
+            end)
+        end
     end), "itemESP")
     
     -- Descendant removido
-    ConnectionManager:Add("itemESP_descendantRemoved", self._entitiesFolder.DescendantRemoved:Connect(function(obj)
+    ConnectionManager:Add("itemESP_descRemoved", self._entitiesFolder.DescendantRemoved:Connect(function(obj)
         self:Remove(obj)
     end), "itemESP")
-    
-    print("✅ ItemESP: Monitorando pasta Entities")
 end
 
 -- ============================================================================
--- LIMPAR TUDO
+-- INICIALIZAÇÃO PRINCIPAL
 -- ============================================================================
 
-function ItemESP:ClearAll()
-    -- Coletar todas as keys primeiro (evita modificar durante iteração)
-    local objects = {}
-    for obj in pairs(self._cache) do
-        table.insert(objects, obj)
+function ItemESP:Init()
+    if self._initialized then return end
+    
+    print("📦 ItemESP: Inicializando...")
+    
+    -- Setup folders
+    self:SetupFolders()
+    
+    -- Setup respawn handler
+    self:SetupRespawnHandler()
+    
+    -- Buscar pasta Entities
+    self._entitiesFolder = workspace:FindFirstChild("Entities")
+    
+    if self._entitiesFolder then
+        self:SetupEntityConnections()
+        self:ScanEntities()
+    else
+        -- Esperar pela pasta
+        task.spawn(function()
+            self._entitiesFolder = workspace:WaitForChild("Entities", 60)
+            if self._entitiesFolder then
+                self:SetupEntityConnections()
+                self:ScanEntities()
+            else
+                warn("📦 ItemESP: Pasta Entities não encontrada!")
+            end
+        end)
     end
     
-    -- Remover cada um
-    for _, obj in ipairs(objects) do
-        self:Remove(obj)
-    end
+    -- Iniciar loop de update
+    self:StartUpdateLoop()
+    
+    self._initialized = true
+    print("✅ ItemESP: Inicializado!")
 end
 
 -- ============================================================================
--- TOGGLE
+-- ENABLE / DISABLE / TOGGLE
 -- ============================================================================
 
 function ItemESP:Enable()
     if not self._initialized then
         self:Init()
     else
+        self:StartUpdateLoop()
         self:ScanEntities()
     end
 end
 
 function ItemESP:Disable()
+    self:StopUpdateLoop()
     self:ClearAll()
 end
 
@@ -361,7 +549,29 @@ function ItemESP:Toggle(state)
 end
 
 -- ============================================================================
--- ESTATÍSTICAS
+-- LIMPEZA
+-- ============================================================================
+
+function ItemESP:ClearAll()
+    local objects = {}
+    for obj in pairs(self._cache) do
+        table.insert(objects, obj)
+    end
+    
+    for _, obj in ipairs(objects) do
+        self:Remove(obj)
+    end
+end
+
+function ItemESP:Refresh()
+    self:ClearAll()
+    if Config.ItemESP then
+        self:ScanEntities()
+    end
+end
+
+-- ============================================================================
+-- MÉTRICAS E DEBUG
 -- ============================================================================
 
 function ItemESP:GetCount()
@@ -372,19 +582,25 @@ function ItemESP:GetCount()
     return count
 end
 
+function ItemESP:GetMetrics()
+    return {
+        currentCount = self:GetCount(),
+        totalCreated = self._metrics.totalCreated,
+        totalRemoved = self._metrics.totalRemoved,
+        itemsIgnored = self._metrics.itemsIgnored,
+        lastUpdateTime = string.format("%.4fms", self._metrics.lastUpdateTime * 1000),
+        averageUpdateTime = string.format("%.4fms", self._metrics.averageUpdateTime * 1000),
+        updateCount = self._metrics.updateCount,
+        updateLoopRunning = self._updateLoopRunning,
+    }
+end
+
 function ItemESP:IsTracking(obj)
     return self._cache[obj] ~= nil
 end
 
--- ============================================================================
--- REFRESH (RESCAN)
--- ============================================================================
-
-function ItemESP:Refresh()
-    self:ClearAll()
-    if Config.ItemESP then
-        self:ScanEntities()
-    end
+function ItemESP:GetItemConfidence(obj)
+    return getItemConfidence(obj)
 end
 
 -- ============================================================================
