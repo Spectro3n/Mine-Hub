@@ -192,7 +192,7 @@ function RayfieldUI:CreateWorldTab()
             end
         end,
     })
-    
+
     -- Opcional: Slider para ajustar horário
     WorldTab:CreateSlider({
         Name = "⏰ Horário do Dia",
@@ -204,7 +204,7 @@ function RayfieldUI:CreateWorldTab()
             AlwaysDay:SetTime(Value)
         end,
     })
-    
+
     -- Opcional: Toggle para propriedades extras
     WorldTab:CreateToggle({
         Name = "💡 Travar Brilho/Ambient",
@@ -359,8 +359,8 @@ function RayfieldUI:CreateHitboxTab()
         Suffix = " studs",
         CurrentValue = 6,
         Callback = function(Value)
-            Hitbox:UpdateSize(Value)
-        end,
+             Hitbox:UpdateGlobalSize(Value)
+    end,
     })
 
     HitboxTab:CreateSection("⚙️ Configuração")
